@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Carrom Ranks</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+  const firebaseConfig = {
+    apiKey: "AIzaSyDRZvh2oDwnI7tfen-TpPYuGOUv2J1GGhk",
+    authDomain: "fica-rating-ranking.firebaseapp.com",
+    projectId: "fica-rating-ranking",
+    storageBucket: "fica-rating-ranking.firebasestorage.app",
+    messagingSenderId: "363462974027",
+    appId: "1:363462974027:web:0f7bea890fede991314bce"
+  };
+  firebase.initializeApp(firebaseConfig);
+  window.db = firebase.firestore();
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect } = React;
+
+const COLORS = {
+  cream: "#EDE3CC", walnut: "#2B1B10", walnutSoft: "#4A3320", ink: "#17130F",
+  ivory: "#FBF7EC", red: "#A32F26", brass: "#B8923F", brassLight: "#D4B366", line: "#C9BB99",
+};
+const displayFont = "'Fraunces', Georgia, 'Times New Roman', serif";
+const bodyFont = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+const monoFont = "'IBM Plex Mono', ui-monospace, 'SF Mono', monospace";
+const pocketClip = { clipPath: "polygon(0 0, 100% 0, 100% calc(100% - 22px), calc(100% - 22px) 100%, 0 100%)" };
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+const MAX_COLOR_COINS = 9;
+const MAX_QUEEN = 1;
+
+function CarromRatings() {
+  const [players, setPlayers] = useState([]);
+  const [matches, setMatches] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [view, setView] = useState("players");
+  const [connError, setConnError] = useState(null);
+
+  useEffect(() => {
+    const unsubPlayers = db.collection("carromRanks").doc("players").onSnapshot(
+      (snap) => {
+        setPlayers(snap.exists ? (snap.data().list || []) : []);
+        setConnError(null);
+        setLoaded(true);
+      },
+      (err) => { console.error("players listener failed", err); setConnError(err.message); setLoaded(true); }
+    );
+    const unsubMatches = db.collection("carromRanks").doc("matches").onSnapshot(
+      (snap) => setMatches(snap.exists ? (snap.data().list || []) : []),
+      (err) => console.error("matches listener failed", err)
+    );
+    return () => { unsubPlayers(); unsubMatches(); };
+  }, []);
+
+  async function savePlayers(next) {
+    setPlayers(next);
+    try { await db.collection("carromRanks").doc("players").set({ list: next }); }
+    catch (e) { console.error("save players failed", e); setConnError(e.message); }
+  }
+  async function saveMatches(next) {
+    setMatches(next);
+    try { await db.collection("carromRanks").doc("matches").set({ list: next }); }
+    catch (e) { console.error("save matches failed", e); setConnError(e.message); }
+  }
+
+  return (
+    <div style={{ background: COLORS.cream, minHeight: "100vh", fontFamily: bodyFont }} className="pb-16">
+      <Header view={view} setView={setView} />
+      {connError && (
+        <div style={{ background: COLORS.red, color: COLORS.ivory }} className="text-center text-xs px-4 py-2">
+          ⚠️ Couldn't reach the database: {connError}
+        </div>
+      )}
+      <main className="max-w-2xl mx-auto px-4 pt-6">
+        {!loaded ? (
+          <p className="text-center py-20" style={{ color: COLORS.walnutSoft }}>Loading board…</p>
+        ) : view === "players" ? (
+          <PlayersView players={players} savePlayers={savePlayers} />
+        ) : view === "match" ? (
+          <MatchView players={players} savePlayers={savePlayers} matches={matches} saveMatches={saveMatches} onViewRankings={() => setView("players")} />
+        ) : (
+          <HistoryView matches={matches} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Header({ view, setView }) {
+  const tabs = [{ id: "players", label: "Rankings" }, { id: "match", label: "New Match" }, { id: "history", label: "History" }];
+  return (
+    <div style={{ background: COLORS.walnut }} className="text-center">
+      <div className="max-w-2xl mx-auto px-4 pt-7 pb-4">
+        <div className="flex items-center justify-center gap-2 mb-1">
+          <span style={{ color: COLORS.ivory, fontSize: 20 }}>⚫</span>
+          <h1 style={{ fontFamily: displayFont, color: COLORS.ivory, letterSpacing: "0.01em" }} className="text-3xl font-semibold">Carrom Ranks</h1>
+          <span style={{ color: COLORS.red, fontSize: 20 }}>●</span>
+        </div>
+        <p style={{ color: COLORS.brassLight }} className="text-xs tracking-wide">shared board · live for anyone with this link</p>
+      </div>
+      <div className="flex max-w-2xl mx-auto">
+        {tabs.map((t) => {
+          const active = view === t.id;
+          return (
+            <button key={t.id} onClick={() => setView(t.id)} className="flex-1 py-3 text-sm font-medium transition-colors"
+              style={{ color: active ? COLORS.walnut : COLORS.brassLight, background: active ? COLORS.cream : "transparent", borderTop: active ? `2px solid ${COLORS.brass}` : "2px solid transparent" }}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Card({ children, className = "" }) {
+  return <div style={{ background: COLORS.ivory, border: `1px solid ${COLORS.line}`, ...pocketClip }} className={`p-5 mb-4 ${className}`}>{children}</div>;
+}
+
+function PlayersView({ players, savePlayers }) {
+  const [bulkText, setBulkText] = useState("");
+  const [name, setName] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editRating, setEditRating] = useState("");
+
+  function addBulk() {
+    const lines = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    const additions = lines.map((line) => {
+      const [rawName, rawRating] = line.split(",").map((s) => s && s.trim());
+      const rating = parseInt(rawRating, 10);
+      return { id: uid(), name: rawName || "Unnamed", rating: Number.isFinite(rating) ? rating : 1000, wins: 0, losses: 0, played: 0 };
+    });
+    savePlayers([...players, ...additions]);
+    setBulkText("");
+  }
+  function addSingle() {
+    if (!name.trim()) return;
+    savePlayers([...players, { id: uid(), name: name.trim(), rating: 1000, wins: 0, losses: 0, played: 0 }]);
+    setName("");
+  }
+  function deletePlayer(id) { savePlayers(players.filter((p) => p.id !== id)); }
+  function startEdit(p) { setEditingId(p.id); setEditRating(String(p.rating)); }
+  function saveEdit(id) {
+    const r = parseInt(editRating, 10);
+    savePlayers(players.map((p) => (p.id === id ? { ...p, rating: Number.isFinite(r) ? r : p.rating } : p)));
+    setEditingId(null);
+  }
+  const ranked = [...players].sort((a, b) => b.rating - a.rating);
+
+  return (
+    <div>
+      <Card>
+        <h2 style={{ fontFamily: displayFont, color: COLORS.walnut }} className="text-lg font-semibold mb-3">Add players</h2>
+        <p className="text-xs mb-2" style={{ color: COLORS.walnutSoft }}>Paste a list — one player per line, as "Name, Rating" (rating optional, defaults to 1000).</p>
+        <textarea value={bulkText} onChange={(e) => setBulkText(e.target.value)} placeholder={"Asha, 1180\nRohit, 1050\nMeera"} rows={3}
+          className="w-full border rounded-md px-3 py-2 text-sm mb-2 outline-none" style={{ borderColor: COLORS.line, fontFamily: monoFont, background: "white" }} />
+        <button onClick={addBulk} className="text-sm font-medium px-4 py-2 rounded-full" style={{ background: COLORS.walnut, color: COLORS.ivory }}>Add list</button>
+        <div className="flex items-center gap-2 mt-4">
+          <input value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addSingle()} placeholder="Add one player by name"
+            className="flex-1 border rounded-md px-3 py-2 text-sm outline-none" style={{ borderColor: COLORS.line, background: "white" }} />
+          <button onClick={addSingle} className="text-sm font-medium px-3 py-2 rounded-full border" style={{ borderColor: COLORS.brass, color: COLORS.walnut }}>Add</button>
+        </div>
+      </Card>
+      <h2 style={{ fontFamily: displayFont, color: COLORS.walnut }} className="text-lg font-semibold mb-2 px-1">Rankings</h2>
+      {ranked.length === 0 ? (
+        <Card><p className="text-sm" style={{ color: COLORS.walnutSoft }}>No players yet. Add your current rating list above to start the board.</p></Card>
+      ) : (
+        <Card className="!p-0">
+          {ranked.map((p, i) => (
+            <div key={p.id} className="flex items-center justify-between px-4 py-3" style={{ borderBottom: i < ranked.length - 1 ? `1px solid ${COLORS.line}` : "none" }}>
+              <div className="flex items-center gap-3">
+                <span style={{ fontFamily: displayFont, color: COLORS.brass, width: 28 }} className="text-lg font-semibold text-right">{i + 1}</span>
+                <div>
+                  <div style={{ color: COLORS.ink }} className="text-sm font-medium">{p.name}</div>
+                  <div style={{ color: COLORS.walnutSoft }} className="text-xs">{p.played} played · {p.wins}W {p.losses}L</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                {editingId === p.id ? (
+                  <>
+                    <input value={editRating} onChange={(e) => setEditRating(e.target.value)} className="w-16 border rounded px-2 py-1 text-sm text-right" style={{ borderColor: COLORS.line, fontFamily: monoFont }} />
+                    <button onClick={() => saveEdit(p.id)} className="text-xs font-medium px-2 py-1 rounded" style={{ background: COLORS.walnut, color: COLORS.ivory }}>Save</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontFamily: monoFont, color: COLORS.walnut }} className="text-base font-semibold">{p.rating}</span>
+                    <button onClick={() => startEdit(p)} className="text-xs" style={{ color: COLORS.brass }} title="Adjust rating">edit</button>
+                    <button onClick={() => deletePlayer(p.id)} className="text-xs" style={{ color: COLORS.red }}>remove</button>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function MatchView({ players, savePlayers, matches, saveMatches, onViewRankings }) {
+  const empty = { blackA: "", blackB: "", whiteA: "", whiteB: "" };
+  const [sel, setSel] = useState(empty);
+  const [started, setStarted] = useState(false);
+  const [pts, setPts] = useState({});
+  const [coinsUsed, setCoinsUsed] = useState({ black: 0, white: 0, red: 0 });
+  const [summary, setSummary] = useState(null);
+  const slots = ["blackA", "blackB", "whiteA", "whiteB"];
+  const chosenIds = slots.map((s) => sel[s]).filter(Boolean);
+  function optionsFor(slot) { return players.filter((p) => p.id === sel[slot] || !chosenIds.includes(p.id)); }
+  function canStart() { return slots.every((s) => sel[s]) && new Set(chosenIds).size === 4; }
+  function start() {
+    if (!canStart()) return;
+    setPts({ [sel.blackA]: 0, [sel.blackB]: 0, [sel.whiteA]: 0, [sel.whiteB]: 0 });
+    setCoinsUsed({ black: 0, white: 0, red: 0 });
+    setSummary(null);
+    setStarted(true);
+  }
+  function addPoints(playerId, delta) { setPts((s) => ({ ...s, [playerId]: (s[playerId] || 0) + delta })); }
+  function handleCoin(playerId, team) {
+    if (coinsUsed[team] >= MAX_COLOR_COINS) return;
+    setCoinsUsed((c) => ({ ...c, [team]: c[team] + 1 }));
+    addPoints(playerId, 1);
+  }
+  function handleRed(playerId) {
+    if (coinsUsed.red >= MAX_QUEEN) return;
+    setCoinsUsed((c) => ({ ...c, red: c.red + 1 }));
+    addPoints(playerId, 2);
+  }
+  function handleFoul(playerId, team) {
+    const oppColor = team === "black" ? "white" : "black";
+    if (coinsUsed[oppColor] >= MAX_COLOR_COINS) return;
+    setCoinsUsed((c) => ({ ...c, [oppColor]: c[oppColor] + 1 }));
+    addPoints(playerId, -2);
+  }
+  function playerById(id) { return players.find((p) => p.id === id); }
+  const blackTotal = (pts[sel.blackA] || 0) + (pts[sel.blackB] || 0);
+  const whiteTotal = (pts[sel.whiteA] || 0) + (pts[sel.whiteB] || 0);
+
+  function finish() {
+    const blackWon = blackTotal > whiteTotal;
+    const whiteWon = whiteTotal > blackTotal;
+    const bonus = (won, lost) => (won ? 2 : lost ? -2 : 0);
+    const blackBonus = bonus(blackWon, whiteWon);
+    const whiteBonus = bonus(whiteWon, blackWon);
+    const ids = { blackA: sel.blackA, blackB: sel.blackB, whiteA: sel.whiteA, whiteB: sel.whiteB };
+    const deltas = {};
+    ["blackA", "blackB"].forEach((s) => (deltas[ids[s]] = (pts[ids[s]] || 0) + blackBonus));
+    ["whiteA", "whiteB"].forEach((s) => (deltas[ids[s]] = (pts[ids[s]] || 0) + whiteBonus));
+    const nextPlayers = players.map((p) => {
+      if (!(p.id in deltas)) return p;
+      const isBlack = p.id === sel.blackA || p.id === sel.blackB;
+      const won = isBlack ? blackWon : whiteWon;
+      const lost = isBlack ? whiteWon : blackWon;
+      return { ...p, rating: p.rating + deltas[p.id], played: p.played + 1, wins: p.wins + (won ? 1 : 0), losses: p.losses + (lost ? 1 : 0) };
+    });
+    const record = {
+      id: uid(), date: new Date().toISOString(),
+      black: [sel.blackA, sel.blackB].map((id) => ({ name: playerById(id).name, points: pts[id] || 0, delta: deltas[id] })),
+      white: [sel.whiteA, sel.whiteB].map((id) => ({ name: playerById(id).name, points: pts[id] || 0, delta: deltas[id] })),
+      scoreBlack: blackTotal, scoreWhite: whiteTotal,
+    };
+    savePlayers(nextPlayers);
+    saveMatches([record, ...matches]);
+    setSummary(record);
+    setStarted(false);
+  }
+  function newMatch() { setSel(empty); setSummary(null); }
+
+  if (players.length < 4) {
+    return <Card><p className="text-sm" style={{ color: COLORS.walnutSoft }}>You need at least 4 players on the board before starting a doubles match. Add players in the Rankings tab.</p></Card>;
+  }
+  if (summary) {
+    const winner = summary.scoreBlack === summary.scoreWhite ? "Draw" : summary.scoreBlack > summary.scoreWhite ? "Team ⚫ Black wins" : "Team ○ White wins";
+    return (
+      <Card>
+        <h2 style={{ fontFamily: displayFont, color: COLORS.walnut }} className="text-lg font-semibold mb-1">{winner}</h2>
+        <p style={{ fontFamily: monoFont, color: COLORS.ink }} className="text-2xl mb-4">{summary.scoreBlack} — {summary.scoreWhite}</p>
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div>
+            <div style={{ color: COLORS.walnut }} className="text-xs font-medium mb-2">⚫ Black</div>
+            {summary.black.map((pl) => <PlayerDeltaRow key={pl.name} pl={pl} />)}
+          </div>
+          <div>
+            <div style={{ color: COLORS.walnut }} className="text-xs font-medium mb-2">○ White</div>
+            {summary.white.map((pl) => <PlayerDeltaRow key={pl.name} pl={pl} />)}
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={newMatch} className="text-sm font-medium px-4 py-2 rounded-full" style={{ background: COLORS.walnut, color: COLORS.ivory }}>Start another match</button>
+          <button onClick={onViewRankings} className="text-sm font-medium px-4 py-2 rounded-full border" style={{ borderColor: COLORS.brass, color: COLORS.walnut }}>View updated rankings</button>
+        </div>
+      </Card>
+    );
+  }
+  if (started) {
+    const black = [playerById(sel.blackA), playerById(sel.blackB)];
+    const white = [playerById(sel.whiteA), playerById(sel.whiteB)];
+    return (
+      <div>
+        <div className="flex justify-center gap-6 mb-3" style={{ fontFamily: monoFont }}>
+          <span style={{ color: COLORS.walnut }} className="text-lg font-semibold">⚫ {blackTotal}</span>
+          <span style={{ color: COLORS.walnutSoft }}>—</span>
+          <span style={{ color: COLORS.walnut }} className="text-lg font-semibold">{whiteTotal} ○</span>
+        </div>
+        <div className="flex justify-center gap-4 mb-4 text-xs" style={{ color: COLORS.walnutSoft, fontFamily: monoFont }}>
+          <span>⚫ left: {MAX_COLOR_COINS - coinsUsed.black}/9</span>
+          <span>○ left: {MAX_COLOR_COINS - coinsUsed.white}/9</span>
+          <span>👑 queen: {coinsUsed.red >= MAX_QUEEN ? "taken" : "on board"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <div style={{ color: COLORS.walnut }} className="text-sm font-medium mb-2">⚫ Team Black</div>
+            {black.map((p) => (
+              <PlayerScorer key={p.id} player={p} points={pts[p.id] || 0}
+                coinDisabled={coinsUsed.black >= MAX_COLOR_COINS} redDisabled={coinsUsed.red >= MAX_QUEEN} foulDisabled={coinsUsed.white >= MAX_COLOR_COINS}
+                onCoin={() => handleCoin(p.id, "black")} onRed={() => handleRed(p.id)} onFoul={() => handleFoul(p.id, "black")} />
+            ))}
+          </div>
+          <div>
+            <div style={{ color: COLORS.walnut }} className="text-sm font-medium mb-2">○ Team White</div>
+            {white.map((p) => (
+              <PlayerScorer key={p.id} player={p} points={pts[p.id] || 0}
+                coinDisabled={coinsUsed.white >= MAX_COLOR_COINS} redDisabled={coinsUsed.red >= MAX_QUEEN} foulDisabled={coinsUsed.black >= MAX_COLOR_COINS}
+                onCoin={() => handleCoin(p.id, "white")} onRed={() => handleRed(p.id)} onFoul={() => handleFoul(p.id, "white")} />
+            ))}
+          </div>
+        </div>
+        <div className="flex gap-3 mt-4">
+          <button onClick={finish} className="flex-1 text-sm font-semibold py-3 rounded-full" style={{ background: COLORS.red, color: COLORS.ivory }}>Finish match</button>
+          <button onClick={() => setStarted(false)} className="px-4 py-3 rounded-full text-sm border" style={{ borderColor: COLORS.line, color: COLORS.walnutSoft }}>Cancel</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <Card>
+      <h2 style={{ fontFamily: displayFont, color: COLORS.walnut }} className="text-lg font-semibold mb-4">Pick four players</h2>
+      <div className="grid grid-cols-2 gap-4">
+        <TeamPicker label="⚫ Team Black" slotA="blackA" slotB="blackB" sel={sel} setSel={setSel} optionsFor={optionsFor} />
+        <TeamPicker label="○ Team White" slotA="whiteA" slotB="whiteB" sel={sel} setSel={setSel} optionsFor={optionsFor} />
+      </div>
+      <button onClick={start} disabled={!canStart()} className="mt-5 w-full text-sm font-semibold py-3 rounded-full"
+        style={{ background: canStart() ? COLORS.walnut : COLORS.line, color: canStart() ? COLORS.ivory : COLORS.walnutSoft }}>Start match</button>
+    </Card>
+  );
+}
+
+function TeamPicker({ label, slotA, slotB, sel, setSel, optionsFor }) {
+  return (
+    <div>
+      <div style={{ color: COLORS.walnut }} className="text-sm font-medium mb-2">{label}</div>
+      {[slotA, slotB].map((slot) => (
+        <select key={slot} value={sel[slot]} onChange={(e) => setSel({ ...sel, [slot]: e.target.value })}
+          className="w-full border rounded-md px-2 py-2 text-sm mb-2 outline-none" style={{ borderColor: COLORS.line, background: "white" }}>
+          <option value="">Select player</option>
+          {optionsFor(slot).map((p) => <option key={p.id} value={p.id}>{p.name} ({p.rating})</option>)}
+        </select>
+      ))}
+    </div>
+  );
+}
+
+function PlayerScorer({ player, points, coinDisabled, redDisabled, foulDisabled, onCoin, onRed, onFoul }) {
+  const btn = (disabled, bg, color, border) => ({
+    background: disabled ? COLORS.line : bg, color: disabled ? COLORS.walnutSoft : color,
+    border: border ? `1px solid ${disabled ? COLORS.line : border}` : "none", opacity: disabled ? 0.6 : 1, cursor: disabled ? "not-allowed" : "pointer",
+  });
+  return (
+    <div style={{ background: COLORS.ivory, border: `1px solid ${COLORS.line}`, ...pocketClip }} className="p-3 mb-3">
+      <div style={{ color: COLORS.walnut }} className="text-sm font-medium mb-1 truncate">{player.name}</div>
+      <div style={{ fontFamily: monoFont, color: COLORS.ink }} className="text-2xl font-semibold mb-2 text-center">{points}</div>
+      <div className="flex flex-col gap-1.5">
+        <button onClick={onCoin} disabled={coinDisabled} className="text-xs font-medium py-1.5 rounded-full" style={btn(coinDisabled, COLORS.walnut, COLORS.ivory)}>+1 coin</button>
+        <button onClick={onRed} disabled={redDisabled} className="text-xs font-medium py-1.5 rounded-full" style={btn(redDisabled, COLORS.red, COLORS.ivory)}>+2 queen</button>
+        <button onClick={onFoul} disabled={foulDisabled} className="text-xs font-medium py-1.5 rounded-full" style={btn(foulDisabled, "transparent", COLORS.walnutSoft, COLORS.brass)}>−2 foul</button>
+      </div>
+    </div>
+  );
+}
+
+function PlayerDeltaRow({ pl }) {
+  const positive = pl.delta > 0;
+  return (
+    <div style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }} className="p-2 rounded-md mb-2">
+      <div style={{ color: COLORS.ink }} className="text-xs mb-0.5">{pl.name} <span style={{ color: COLORS.walnutSoft }}>· {pl.points} pts</span></div>
+      <div style={{ fontFamily: monoFont, color: positive ? COLORS.walnut : COLORS.red }} className="text-base font-semibold">{positive ? "+" : ""}{pl.delta}</div>
+    </div>
+  );
+}
+
+function HistoryView({ matches }) {
+  if (matches.length === 0) {
+    return <Card><p className="text-sm" style={{ color: COLORS.walnutSoft }}>No matches recorded yet. Play one from the New Match tab and it'll show up here.</p></Card>;
+  }
+  return (
+    <div>
+      {matches.map((m) => {
+        const date = new Date(m.date);
+        const winner = m.scoreBlack === m.scoreWhite ? "Draw" : m.scoreBlack > m.scoreWhite ? "⚫ Black won" : "○ White won";
+        return (
+          <Card key={m.id}>
+            <div className="flex items-center justify-between mb-3">
+              <span style={{ color: COLORS.walnutSoft }} className="text-xs">{date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</span>
+              <span style={{ color: COLORS.walnut }} className="text-xs font-medium">{winner} · {m.scoreBlack}–{m.scoreWhite}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div style={{ color: COLORS.walnut }} className="text-xs font-medium mb-1">⚫ Black</div>
+                {m.black.map((pl) => <PlayerDeltaRow key={pl.name} pl={pl} />)}
+              </div>
+              <div>
+                <div style={{ color: COLORS.walnut }} className="text-xs font-medium mb-1">○ White</div>
+                {m.white.map((pl) => <PlayerDeltaRow key={pl.name} pl={pl} />)}
+              </div>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<CarromRatings />);
+</script>
+</body>
+</html>
