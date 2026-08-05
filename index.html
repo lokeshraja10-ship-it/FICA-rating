@@ -18,25 +18,64 @@ window.addEventListener('unhandledrejection', function(e) {
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div id="root"></div>
-<script>
-  const firebaseConfig = {
-    apiKey: "AIzaSyDRZvh2oDwnI7tfen-TpPYuGOUv2J1GGhk",
-    authDomain: "fica-rating-ranking.firebaseapp.com",
-    projectId: "fica-rating-ranking",
-    storageBucket: "fica-rating-ranking.firebasestorage.app",
-    messagingSenderId: "363462974027",
-    appId: "1:363462974027:web:0f7bea890fede991314bce"
-  };
-  firebase.initializeApp(firebaseConfig);
-  window.db = firebase.firestore();
-</script>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect } = React;
+const { useState, useEffect, useRef } = React;
+
+/* ---- Firestore via plain REST calls (no SDK, so no browser-compatibility issues) ---- */
+const PROJECT_ID = "fica-rating-ranking";
+const FS_BASE = "https://firestore.googleapis.com/v1/projects/" + PROJECT_ID + "/databases/(default)/documents";
+
+function toFsValue(v) {
+  if (v === null || v === undefined) return { nullValue: null };
+  if (typeof v === "string") return { stringValue: v };
+  if (typeof v === "number") return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
+  if (typeof v === "boolean") return { booleanValue: v };
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(toFsValue) } };
+  if (typeof v === "object") {
+    const fields = {};
+    Object.keys(v).forEach((k) => { fields[k] = toFsValue(v[k]); });
+    return { mapValue: { fields } };
+  }
+  return { stringValue: String(v) };
+}
+function fromFsValue(fv) {
+  if (!fv) return null;
+  if ("stringValue" in fv) return fv.stringValue;
+  if ("integerValue" in fv) return parseInt(fv.integerValue, 10);
+  if ("doubleValue" in fv) return fv.doubleValue;
+  if ("booleanValue" in fv) return fv.booleanValue;
+  if ("nullValue" in fv) return null;
+  if ("arrayValue" in fv) return (fv.arrayValue.values || []).map(fromFsValue);
+  if ("mapValue" in fv) {
+    const out = {};
+    const fields = fv.mapValue.fields || {};
+    Object.keys(fields).forEach((k) => { out[k] = fromFsValue(fields[k]); });
+    return out;
+  }
+  return null;
+}
+
+async function fsGetList(docId) {
+  const res = await fetch(FS_BASE + "/carromRanks/" + docId);
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error("Firestore read failed (" + res.status + ")");
+  const data = await res.json();
+  const fields = data.fields || {};
+  return fields.list ? fromFsValue(fields.list) : [];
+}
+
+async function fsSetList(docId, list) {
+  const body = { fields: { list: toFsValue(list) } };
+  const res = await fetch(FS_BASE + "/carromRanks/" + docId + "?updateMask.fieldPaths=list", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Firestore write failed (" + res.status + ")");
+}
 
 const COLORS = {
   cream: "#EDE3CC", walnut: "#2B1B10", walnutSoft: "#4A3320", ink: "#17130F",
@@ -56,32 +95,36 @@ function CarromRatings() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState("players");
   const [connError, setConnError] = useState(null);
+  const editingRef = useRef(false);
+
+  async function refresh() {
+    try {
+      const [p, m] = await Promise.all([fsGetList("players"), fsGetList("matches")]);
+      if (!editingRef.current) setPlayers(p);
+      setMatches(m);
+      setConnError(null);
+    } catch (e) {
+      setConnError(e.message);
+    } finally {
+      setLoaded(true);
+    }
+  }
 
   useEffect(() => {
-    const unsubPlayers = db.collection("carromRanks").doc("players").onSnapshot(
-      (snap) => {
-        setPlayers(snap.exists ? (snap.data().list || []) : []);
-        setConnError(null);
-        setLoaded(true);
-      },
-      (err) => { console.error("players listener failed", err); setConnError(err.message); setLoaded(true); }
-    );
-    const unsubMatches = db.collection("carromRanks").doc("matches").onSnapshot(
-      (snap) => setMatches(snap.exists ? (snap.data().list || []) : []),
-      (err) => console.error("matches listener failed", err)
-    );
-    return () => { unsubPlayers(); unsubMatches(); };
+    refresh();
+    const interval = setInterval(refresh, 6000);
+    return () => clearInterval(interval);
   }, []);
 
   async function savePlayers(next) {
     setPlayers(next);
-    try { await db.collection("carromRanks").doc("players").set({ list: next }); }
-    catch (e) { console.error("save players failed", e); setConnError(e.message); }
+    try { await fsSetList("players", next); setConnError(null); }
+    catch (e) { setConnError(e.message); }
   }
   async function saveMatches(next) {
     setMatches(next);
-    try { await db.collection("carromRanks").doc("matches").set({ list: next }); }
-    catch (e) { console.error("save matches failed", e); setConnError(e.message); }
+    try { await fsSetList("matches", next); setConnError(null); }
+    catch (e) { setConnError(e.message); }
   }
 
   return (
@@ -96,7 +139,7 @@ function CarromRatings() {
         {!loaded ? (
           <p className="text-center py-20" style={{ color: COLORS.walnutSoft }}>Loading board…</p>
         ) : view === "players" ? (
-          <PlayersView players={players} savePlayers={savePlayers} />
+          <PlayersView players={players} savePlayers={savePlayers} editingRef={editingRef} />
         ) : view === "match" ? (
           <MatchView players={players} savePlayers={savePlayers} matches={matches} saveMatches={saveMatches} onViewRankings={() => setView("players")} />
         ) : (
@@ -138,11 +181,15 @@ function Card({ children, className = "" }) {
   return <div style={{ background: COLORS.ivory, border: `1px solid ${COLORS.line}`, ...pocketClip }} className={`p-5 mb-4 ${className}`}>{children}</div>;
 }
 
-function PlayersView({ players, savePlayers }) {
+function PlayersView({ players, savePlayers, editingRef }) {
   const [bulkText, setBulkText] = useState("");
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editRating, setEditRating] = useState("");
+
+  useEffect(() => {
+    editingRef.current = editingId !== null || bulkText.length > 0 || name.length > 0;
+  }, [editingId, bulkText, name]);
 
   function addBulk() {
     const lines = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
