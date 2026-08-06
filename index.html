@@ -74,6 +74,26 @@ async function fsSetList(docId, list) {
   });
   if (!res.ok) throw new Error("Firestore write failed (" + res.status + ")");
 }
+async function fsGetDoc(docId) {
+  const res = await fetch(FS_BASE + "/carromRanks/" + docId);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Firestore read failed (" + res.status + ")");
+  const data = await res.json();
+  if (!data.fields) return null;
+  return fromFsValue({ mapValue: { fields: data.fields } });
+}
+async function fsSetDoc(docId, obj) {
+  const body = { fields: {} };
+  Object.keys(obj).forEach((k) => {
+    body.fields[k] = toFsValue(obj[k]);
+  });
+  const res = await fetch(FS_BASE + "/carromRanks/" + docId, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error("Firestore write failed (" + res.status + ")");
+}
 const COLORS = {
   cream: "#EDE3CC",
   walnut: "#2B1B10",
@@ -100,7 +120,32 @@ function CarromRatings() {
   const [loaded, setLoaded] = useState(false);
   const [view, setView] = useState("players");
   const [connError, setConnError] = useState(null);
+  const [adminPin, setAdminPin] = useState(void 0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const editingRef = useRef(false);
+  async function loadAdminPin() {
+    try {
+      const config = await fsGetDoc("config");
+      setAdminPin(config && config.adminPin ? config.adminPin : null);
+    } catch (e) {
+      setAdminPin(null);
+    }
+  }
+  async function createAdminPin(pin) {
+    await fsSetDoc("config", { adminPin: pin });
+    setAdminPin(pin);
+    setIsAdmin(true);
+  }
+  function trySignIn(pin) {
+    if (adminPin && pin === adminPin) {
+      setIsAdmin(true);
+      return true;
+    }
+    return false;
+  }
+  function signOut() {
+    setIsAdmin(false);
+  }
   async function refresh() {
     try {
       const [p, m] = await Promise.all([fsGetList("players"), fsGetList("matches")]);
@@ -115,6 +160,7 @@ function CarromRatings() {
   }
   useEffect(() => {
     refresh();
+    loadAdminPin();
     const interval = setInterval(refresh, 6e3);
     return () => clearInterval(interval);
   }, []);
@@ -136,11 +182,56 @@ function CarromRatings() {
       setConnError(e.message);
     }
   }
-  return /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.cream, minHeight: "100vh", fontFamily: bodyFont }, className: "pb-16" }, /* @__PURE__ */ React.createElement(Header, { view, setView }), connError && /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.red, color: COLORS.ivory }, className: "text-center text-xs px-4 py-2" }, "\u26A0\uFE0F Couldn't reach the database: ", connError), /* @__PURE__ */ React.createElement("main", { className: "max-w-2xl mx-auto px-4 pt-6" }, !loaded ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-20", style: { color: COLORS.walnutSoft } }, "Loading board\u2026") : view === "players" ? /* @__PURE__ */ React.createElement(PlayersView, { players, savePlayers, editingRef }) : view === "match" ? /* @__PURE__ */ React.createElement(MatchView, { players, savePlayers, matches, saveMatches, onViewRankings: () => setView("players") }) : /* @__PURE__ */ React.createElement(HistoryView, { matches })));
+  return /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.cream, minHeight: "100vh", fontFamily: bodyFont }, className: "pb-16" }, /* @__PURE__ */ React.createElement(
+    Header,
+    {
+      view,
+      setView,
+      adminPin,
+      isAdmin,
+      onCreatePin: createAdminPin,
+      onSignIn: trySignIn,
+      onSignOut: signOut
+    }
+  ), connError && /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.red, color: COLORS.ivory }, className: "text-center text-xs px-4 py-2" }, "\u26A0\uFE0F Couldn't reach the database: ", connError), /* @__PURE__ */ React.createElement("main", { className: "max-w-2xl mx-auto px-4 pt-6" }, !loaded ? /* @__PURE__ */ React.createElement("p", { className: "text-center py-20", style: { color: COLORS.walnutSoft } }, "Loading board\u2026") : view === "players" ? /* @__PURE__ */ React.createElement(PlayersView, { players, savePlayers, editingRef, isAdmin }) : view === "match" ? /* @__PURE__ */ React.createElement(MatchView, { players, savePlayers, matches, saveMatches, onViewRankings: () => setView("players") }) : /* @__PURE__ */ React.createElement(HistoryView, { matches })));
 }
-function Header({ view, setView }) {
+function Header({ view, setView, adminPin, isAdmin, onCreatePin, onSignIn, onSignOut }) {
   const tabs = [{ id: "players", label: "Rankings" }, { id: "match", label: "New Match" }, { id: "history", label: "History" }];
-  return /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.walnut }, className: "text-center" }, /* @__PURE__ */ React.createElement("div", { className: "max-w-2xl mx-auto px-4 pt-7 pb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2 mb-1" }, /* @__PURE__ */ React.createElement("span", { style: { color: COLORS.ivory, fontSize: 20 } }, "\u26AB"), /* @__PURE__ */ React.createElement("h1", { style: { fontFamily: displayFont, color: COLORS.ivory, letterSpacing: "0.01em" }, className: "text-3xl font-semibold" }, "Carrom Ranks"), /* @__PURE__ */ React.createElement("span", { style: { color: COLORS.red, fontSize: 20 } }, "\u25CF")), /* @__PURE__ */ React.createElement("p", { style: { color: COLORS.brassLight }, className: "text-xs tracking-wide" }, "shared board \xB7 live for anyone with this link")), /* @__PURE__ */ React.createElement("div", { className: "flex max-w-2xl mx-auto" }, tabs.map((t) => {
+  const [showBox, setShowBox] = useState(false);
+  const [pinInput, setPinInput] = useState("");
+  const [err, setErr] = useState("");
+  function submit() {
+    setErr("");
+    if (adminPin === null) {
+      if (pinInput.length < 4) {
+        setErr("Use at least 4 characters.");
+        return;
+      }
+      onCreatePin(pinInput).then(() => {
+        setShowBox(false);
+        setPinInput("");
+      }).catch((e) => setErr("Save failed: " + e.message));
+    } else {
+      const ok = onSignIn(pinInput);
+      if (!ok) {
+        setErr("Wrong PIN.");
+        return;
+      }
+      setShowBox(false);
+      setPinInput("");
+    }
+  }
+  return /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.walnut }, className: "text-center relative" }, /* @__PURE__ */ React.createElement("div", { className: "absolute right-2 top-2" }, isAdmin ? /* @__PURE__ */ React.createElement("button", { onClick: onSignOut, className: "text-xs px-2 py-1 rounded-full", style: { background: COLORS.brass, color: COLORS.walnut } }, "Admin \u2713 \xB7 sign out") : /* @__PURE__ */ React.createElement("button", { onClick: () => setShowBox((s) => !s), className: "text-xs px-2 py-1 rounded-full border", style: { borderColor: COLORS.brassLight, color: COLORS.brassLight } }, "\u{1F512} Admin")), /* @__PURE__ */ React.createElement("div", { className: "max-w-2xl mx-auto px-4 pt-7 pb-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-2 mb-1" }, /* @__PURE__ */ React.createElement("span", { style: { color: COLORS.ivory, fontSize: 20 } }, "\u26AB"), /* @__PURE__ */ React.createElement("h1", { style: { fontFamily: displayFont, color: COLORS.ivory, letterSpacing: "0.01em" }, className: "text-3xl font-semibold" }, "Carrom Ranks"), /* @__PURE__ */ React.createElement("span", { style: { color: COLORS.red, fontSize: 20 } }, "\u25CF")), /* @__PURE__ */ React.createElement("p", { style: { color: COLORS.brassLight }, className: "text-xs tracking-wide" }, "shared board \xB7 live for anyone with this link")), showBox && !isAdmin && /* @__PURE__ */ React.createElement("div", { className: "max-w-2xl mx-auto px-4 pb-4 text-left" }, /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.cream, border: `1px solid ${COLORS.line}` }, className: "p-3 rounded-md" }, adminPin === void 0 ? /* @__PURE__ */ React.createElement("p", { style: { color: COLORS.walnutSoft }, className: "text-xs" }, "Checking\u2026") : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("p", { style: { color: COLORS.walnutSoft }, className: "text-xs mb-2" }, adminPin === null ? "No admin PIN set yet. Create one to control who can add or edit players." : "Enter the admin PIN to add or edit players."), /* @__PURE__ */ React.createElement(
+    "input",
+    {
+      type: "password",
+      value: pinInput,
+      onChange: (e) => setPinInput(e.target.value),
+      placeholder: adminPin === null ? "Create a PIN (min 4 characters)" : "Enter PIN",
+      className: "w-full border rounded-md px-3 py-2 text-sm mb-2 outline-none",
+      style: { borderColor: COLORS.line }
+    }
+  ), err && /* @__PURE__ */ React.createElement("p", { style: { color: COLORS.red }, className: "text-xs mb-2" }, err), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: submit, className: "text-xs font-medium px-3 py-1.5 rounded-full", style: { background: COLORS.walnut, color: COLORS.ivory } }, adminPin === null ? "Set PIN & unlock" : "Unlock"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowBox(false), className: "text-xs px-2 py-1 rounded-full", style: { color: COLORS.walnutSoft } }, "Cancel"))))), /* @__PURE__ */ React.createElement("div", { className: "flex max-w-2xl mx-auto" }, tabs.map((t) => {
     const active = view === t.id;
     return /* @__PURE__ */ React.createElement(
       "button",
@@ -157,7 +248,7 @@ function Header({ view, setView }) {
 function Card({ children, className = "" }) {
   return /* @__PURE__ */ React.createElement("div", { style: { background: COLORS.ivory, border: `1px solid ${COLORS.line}`, ...pocketClip }, className: `p-5 mb-4 ${className}` }, children);
 }
-function PlayersView({ players, savePlayers, editingRef }) {
+function PlayersView({ players, savePlayers, editingRef, isAdmin }) {
   const [bulkText, setBulkText] = useState("");
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -194,7 +285,7 @@ function PlayersView({ players, savePlayers, editingRef }) {
     setEditingId(null);
   }
   const ranked = [...players].sort((a, b) => b.rating - a.rating);
-  return /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement("h2", { style: { fontFamily: displayFont, color: COLORS.walnut }, className: "text-lg font-semibold mb-3" }, "Add players"), /* @__PURE__ */ React.createElement("p", { className: "text-xs mb-2", style: { color: COLORS.walnutSoft } }, 'Paste a list \u2014 one player per line, as "Name, Rating" (rating optional, defaults to 1000).'), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", null, isAdmin ? /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement("h2", { style: { fontFamily: displayFont, color: COLORS.walnut }, className: "text-lg font-semibold mb-3" }, "Add players"), /* @__PURE__ */ React.createElement("p", { className: "text-xs mb-2", style: { color: COLORS.walnutSoft } }, 'Paste a list \u2014 one player per line, as "Name, Rating" (rating optional, defaults to 1000).'), /* @__PURE__ */ React.createElement(
     "textarea",
     {
       value: bulkText,
@@ -214,7 +305,7 @@ function PlayersView({ players, savePlayers, editingRef }) {
       className: "flex-1 border rounded-md px-3 py-2 text-sm outline-none",
       style: { borderColor: COLORS.line, background: "white" }
     }
-  ), /* @__PURE__ */ React.createElement("button", { onClick: addSingle, className: "text-sm font-medium px-3 py-2 rounded-full border", style: { borderColor: COLORS.brass, color: COLORS.walnut } }, "Add"))), /* @__PURE__ */ React.createElement("h2", { style: { fontFamily: displayFont, color: COLORS.walnut }, className: "text-lg font-semibold mb-2 px-1" }, "Rankings"), ranked.length === 0 ? /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement("p", { className: "text-sm", style: { color: COLORS.walnutSoft } }, "No players yet. Add your current rating list above to start the board.")) : /* @__PURE__ */ React.createElement(Card, { className: "!p-0" }, ranked.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: p.id, className: "flex items-center justify-between px-4 py-3", style: { borderBottom: i < ranked.length - 1 ? `1px solid ${COLORS.line}` : "none" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: displayFont, color: COLORS.brass, width: 28 }, className: "text-lg font-semibold text-right" }, i + 1), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { color: COLORS.ink }, className: "text-sm font-medium" }, p.name), /* @__PURE__ */ React.createElement("div", { style: { color: COLORS.walnutSoft }, className: "text-xs" }, p.played, " played \xB7 ", p.wins, "W ", p.losses, "L"))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, editingId === p.id ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { value: editRating, onChange: (e) => setEditRating(e.target.value), className: "w-16 border rounded px-2 py-1 text-sm text-right", style: { borderColor: COLORS.line, fontFamily: monoFont } }), /* @__PURE__ */ React.createElement("button", { onClick: () => saveEdit(p.id), className: "text-xs font-medium px-2 py-1 rounded", style: { background: COLORS.walnut, color: COLORS.ivory } }, "Save")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: monoFont, color: COLORS.walnut }, className: "text-base font-semibold" }, p.rating), /* @__PURE__ */ React.createElement("button", { onClick: () => startEdit(p), className: "text-xs", style: { color: COLORS.brass }, title: "Adjust rating" }, "edit"), /* @__PURE__ */ React.createElement("button", { onClick: () => deletePlayer(p.id), className: "text-xs", style: { color: COLORS.red } }, "remove")))))));
+  ), /* @__PURE__ */ React.createElement("button", { onClick: addSingle, className: "text-sm font-medium px-3 py-2 rounded-full border", style: { borderColor: COLORS.brass, color: COLORS.walnut } }, "Add"))) : /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement("p", { className: "text-xs", style: { color: COLORS.walnutSoft } }, "Sign in as admin (top right) to add or edit players.")), /* @__PURE__ */ React.createElement("h2", { style: { fontFamily: displayFont, color: COLORS.walnut }, className: "text-lg font-semibold mb-2 px-1" }, "Rankings"), ranked.length === 0 ? /* @__PURE__ */ React.createElement(Card, null, /* @__PURE__ */ React.createElement("p", { className: "text-sm", style: { color: COLORS.walnutSoft } }, "No players yet. Add your current rating list above to start the board.")) : /* @__PURE__ */ React.createElement(Card, { className: "!p-0" }, ranked.map((p, i) => /* @__PURE__ */ React.createElement("div", { key: p.id, className: "flex items-center justify-between px-4 py-3", style: { borderBottom: i < ranked.length - 1 ? `1px solid ${COLORS.line}` : "none" } }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: displayFont, color: COLORS.brass, width: 28 }, className: "text-lg font-semibold text-right" }, i + 1), /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("div", { style: { color: COLORS.ink }, className: "text-sm font-medium" }, p.name), /* @__PURE__ */ React.createElement("div", { style: { color: COLORS.walnutSoft }, className: "text-xs" }, p.played, " played \xB7 ", p.wins, "W ", p.losses, "L"))), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3" }, editingId === p.id ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("input", { value: editRating, onChange: (e) => setEditRating(e.target.value), className: "w-16 border rounded px-2 py-1 text-sm text-right", style: { borderColor: COLORS.line, fontFamily: monoFont } }), /* @__PURE__ */ React.createElement("button", { onClick: () => saveEdit(p.id), className: "text-xs font-medium px-2 py-1 rounded", style: { background: COLORS.walnut, color: COLORS.ivory } }, "Save")) : /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("span", { style: { fontFamily: monoFont, color: COLORS.walnut }, className: "text-base font-semibold" }, p.rating), isAdmin && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => startEdit(p), className: "text-xs", style: { color: COLORS.brass }, title: "Adjust rating" }, "edit"), /* @__PURE__ */ React.createElement("button", { onClick: () => deletePlayer(p.id), className: "text-xs", style: { color: COLORS.red } }, "remove"))))))));
 }
 function MatchView({ players, savePlayers, matches, saveMatches, onViewRankings }) {
   const empty = { blackA: "", blackB: "", whiteA: "", whiteB: "" };
