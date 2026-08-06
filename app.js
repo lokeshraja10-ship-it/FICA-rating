@@ -11,8 +11,8 @@
   const h = React.createElement;
   const { fsGetList, fsSetList, fsGetDoc, fsSetDoc } = window.FB;
 
-  const LOGO_SRC = "logo.jpg";
-  const DEFAULT_AVATAR = "default-avatar.png";
+  const LOGO_SRC = "images/logo.jpg";
+  const DEFAULT_AVATAR = "images/default-avatar.png";
   const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
   const MAX_COLOR_COINS = 9;
   const MAX_QUEEN = 1;
@@ -312,7 +312,10 @@
           photo: rawPhoto || "",
           wins: 0,
           losses: 0,
-          played: 0
+          played: 0,
+          totalCoins: 0,
+          totalReds: 0,
+          totalFouls: 0
         };
       });
       savePlayers([...players, ...additions]);
@@ -331,7 +334,10 @@
           photo: photo.trim(),
           wins: 0,
           losses: 0,
-          played: 0
+          played: 0,
+          totalCoins: 0,
+          totalReds: 0,
+          totalFouls: 0
         }
       ]);
       setName("");
@@ -523,7 +529,10 @@
           h(Stat, { label: "Matches", value: player.played }),
           h(Stat, { label: "Wins", value: player.wins }),
           h(Stat, { label: "Losses", value: player.losses }),
-          h(Stat, { label: "Winning %", value: winPct(player) + "%" })
+          h(Stat, { label: "Winning %", value: winPct(player) + "%" }),
+          h(Stat, { label: "Coins taken", value: player.totalCoins || 0 }),
+          h(Stat, { label: "Reds taken", value: player.totalReds || 0 }),
+          h(Stat, { label: "Fouls", value: player.totalFouls || 0 })
         )
       )
     );
@@ -586,6 +595,7 @@
     const [sel, setSel] = useState(empty);
     const [started, setStarted] = useState(false);
     const [pts, setPts] = useState({});
+    const [rawStats, setRawStats] = useState({});
     const [coinsUsed, setCoinsUsed] = useState({ black: 0, white: 0, red: 0 });
     const [summary, setSummary] = useState(null);
     const slots = ["blackA", "blackB", "whiteA", "whiteB"];
@@ -600,6 +610,12 @@
     function start() {
       if (!canStart()) return;
       setPts({ [sel.blackA]: 0, [sel.blackB]: 0, [sel.whiteA]: 0, [sel.whiteB]: 0 });
+      setRawStats({
+        [sel.blackA]: { coins: 0, reds: 0, fouls: 0 },
+        [sel.blackB]: { coins: 0, reds: 0, fouls: 0 },
+        [sel.whiteA]: { coins: 0, reds: 0, fouls: 0 },
+        [sel.whiteB]: { coins: 0, reds: 0, fouls: 0 }
+      });
       setCoinsUsed({ black: 0, white: 0, red: 0 });
       setSummary(null);
       setStarted(true);
@@ -607,21 +623,30 @@
     function addPoints(playerId, delta) {
       setPts((s) => ({ ...s, [playerId]: (s[playerId] || 0) + delta }));
     }
+    function bumpRaw(playerId, key) {
+      setRawStats((s) => ({
+        ...s,
+        [playerId]: { ...s[playerId], [key]: (s[playerId] ? s[playerId][key] : 0) + 1 }
+      }));
+    }
     function handleCoin(playerId, team) {
       if (coinsUsed[team] >= MAX_COLOR_COINS) return;
       setCoinsUsed((c) => ({ ...c, [team]: c[team] + 1 }));
       addPoints(playerId, 1);
+      bumpRaw(playerId, "coins");
     }
     function handleRed(playerId) {
       if (coinsUsed.red >= MAX_QUEEN) return;
       setCoinsUsed((c) => ({ ...c, red: c.red + 1 }));
       addPoints(playerId, 2);
+      bumpRaw(playerId, "reds");
     }
     function handleFoul(playerId, team) {
       const oppColor = team === "black" ? "white" : "black";
       if (coinsUsed[oppColor] >= MAX_COLOR_COINS) return;
       setCoinsUsed((c) => ({ ...c, [oppColor]: c[oppColor] + 1 }));
       addPoints(playerId, -2);
+      bumpRaw(playerId, "fouls");
     }
     function playerById(id) {
       return players.find((p) => p.id === id);
@@ -645,7 +670,17 @@
         const isBlack = p.id === sel.blackA || p.id === sel.blackB;
         const won = isBlack ? blackWon : whiteWon;
         const lost = isBlack ? whiteWon : blackWon;
-        return { ...p, rating: p.rating + deltas[p.id], played: p.played + 1, wins: p.wins + (won ? 1 : 0), losses: p.losses + (lost ? 1 : 0) };
+        const raw = rawStats[p.id] || { coins: 0, reds: 0, fouls: 0 };
+        return {
+          ...p,
+          rating: p.rating + deltas[p.id],
+          played: p.played + 1,
+          wins: p.wins + (won ? 1 : 0),
+          losses: p.losses + (lost ? 1 : 0),
+          totalCoins: (p.totalCoins || 0) + raw.coins,
+          totalReds: (p.totalReds || 0) + raw.reds,
+          totalFouls: (p.totalFouls || 0) + raw.fouls
+        };
       });
       const record = {
         id: uid(),
