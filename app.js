@@ -11,8 +11,8 @@
   const h = React.createElement;
   const { fsGetList, fsSetList, fsGetDoc, fsSetDoc } = window.FB;
 
-  const LOGO_SRC = "logo.jpg";
-  const DEFAULT_AVATAR = "default-avatar.png";
+  const LOGO_SRC = "images/logo.jpg";
+  const DEFAULT_AVATAR = "images/default-avatar.png";
   const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
   const MAX_COLOR_COINS = 9;
   const MAX_QUEEN = 1;
@@ -141,7 +141,7 @@
           ? h(PlayersView, { players, savePlayers, editingRef, isAdmin })
           : view === "match"
           ? h(MatchView, { players, savePlayers, matches, saveMatches, onViewRankings: () => setView("players") })
-          : h(HistoryView, { matches })
+          : h(HistoryView, { matches, players, savePlayers, saveMatches, isAdmin })
       )
     );
   }
@@ -174,7 +174,7 @@
 
     return h(
       "div",
-      { className: "site-header" },
+      { className: "site-header no-print" },
       h(
         "div",
         { className: "site-header__top" },
@@ -378,7 +378,7 @@
       isAdmin
         ? h(
             "div",
-            { className: "panel-card" },
+            { className: "panel-card no-print" },
             h("h2", { className: "panel-card__title" }, "Add players"),
             h("p", { className: "panel-card__hint" }, 'Paste a list \u2014 one per line, as "Name, Rating, Photo path" (rating and photo optional).'),
             h("textarea", {
@@ -421,13 +421,19 @@
             ),
             h("button", { onClick: addSingle, className: "btn btn--gold" }, "Save")
           )
-        : h("div", { className: "panel-card" }, h("p", { className: "panel-card__hint" }, "Sign in as admin (top right) to add or edit players.")),
-
-      h("h2", { className: "section-title" }, "Rankings"),
+        : h("div", { className: "panel-card no-print" }, h("p", { className: "panel-card__hint" }, "Sign in as admin (top right) to add or edit players.")),
 
       h(
         "div",
-        { className: "search-bar" },
+        { className: "rankings-title-row no-print" },
+        h("h2", { className: "section-title", style: { marginBottom: 0 } }, "Rankings"),
+        h("button", { onClick: () => window.print(), className: "btn btn--outline btn--sm" }, "\u2B07 Download PDF")
+      ),
+      h("h2", { className: "section-title print-only" }, "Rankings"),
+
+      h(
+        "div",
+        { className: "search-bar no-print" },
         h("span", { className: "search-bar__icon" }, "\u{1F50D}"),
         h("input", {
           value: search,
@@ -502,7 +508,7 @@
           !editing &&
           h(
             "div",
-            { className: "player-card__admin-actions" },
+            { className: "player-card__admin-actions no-print" },
             h("button", { onClick: onStartRatingEdit, className: "icon-btn", title: "Quick-edit rating" }, "\u270E"),
             h("button", { onClick: onEditPlayer, className: "icon-btn", title: "Edit player" }, "\u2699"),
             h("button", { onClick: onDelete, className: "icon-btn icon-btn--danger", title: "Remove player" }, "\u2716")
@@ -596,6 +602,7 @@
     const [started, setStarted] = useState(false);
     const [pts, setPts] = useState({});
     const [rawStats, setRawStats] = useState({});
+    const [history, setHistory] = useState([]);
     const [coinsUsed, setCoinsUsed] = useState({ black: 0, white: 0, red: 0 });
     const [summary, setSummary] = useState(null);
     const slots = ["blackA", "blackB", "whiteA", "whiteB"];
@@ -617,6 +624,7 @@
         [sel.whiteB]: { coins: 0, reds: 0, fouls: 0 }
       });
       setCoinsUsed({ black: 0, white: 0, red: 0 });
+      setHistory([]);
       setSummary(null);
       setStarted(true);
     }
@@ -629,17 +637,36 @@
         [playerId]: { ...s[playerId], [key]: (s[playerId] ? s[playerId][key] : 0) + 1 }
       }));
     }
+    function pushAction(action) {
+      setHistory((h) => [...h.slice(-2), action]); // keep at most the last 3 actions
+    }
+    function undoLast() {
+      if (history.length === 0) return;
+      const last = history[history.length - 1];
+      setPts((s) => ({ ...s, [last.playerId]: (s[last.playerId] || 0) - last.pointDelta }));
+      setCoinsUsed((c) => ({ ...c, [last.coinsUsedKey]: Math.max(0, c[last.coinsUsedKey] - 1) }));
+      setRawStats((s) => ({
+        ...s,
+        [last.playerId]: {
+          ...s[last.playerId],
+          [last.statKey]: Math.max(0, (s[last.playerId] ? s[last.playerId][last.statKey] : 0) - 1)
+        }
+      }));
+      setHistory((h) => h.slice(0, -1));
+    }
     function handleCoin(playerId, team) {
       if (coinsUsed[team] >= MAX_COLOR_COINS) return;
       setCoinsUsed((c) => ({ ...c, [team]: c[team] + 1 }));
       addPoints(playerId, 1);
       bumpRaw(playerId, "coins");
+      pushAction({ playerId, statKey: "coins", pointDelta: 1, coinsUsedKey: team });
     }
     function handleRed(playerId) {
       if (coinsUsed.red >= MAX_QUEEN) return;
       setCoinsUsed((c) => ({ ...c, red: c.red + 1 }));
       addPoints(playerId, 2);
       bumpRaw(playerId, "reds");
+      pushAction({ playerId, statKey: "reds", pointDelta: 2, coinsUsedKey: "red" });
     }
     function handleFoul(playerId, team) {
       const oppColor = team === "black" ? "white" : "black";
@@ -647,6 +674,7 @@
       setCoinsUsed((c) => ({ ...c, [oppColor]: c[oppColor] + 1 }));
       addPoints(playerId, -2);
       bumpRaw(playerId, "fouls");
+      pushAction({ playerId, statKey: "fouls", pointDelta: -2, coinsUsedKey: oppColor });
     }
     function playerById(id) {
       return players.find((p) => p.id === id);
@@ -685,8 +713,28 @@
       const record = {
         id: uid(),
         date: new Date().toISOString(),
-        black: [sel.blackA, sel.blackB].map((id) => ({ name: playerById(id).name, points: pts[id] || 0, delta: deltas[id] })),
-        white: [sel.whiteA, sel.whiteB].map((id) => ({ name: playerById(id).name, points: pts[id] || 0, delta: deltas[id] })),
+        black: [sel.blackA, sel.blackB].map((id) => ({
+          id,
+          name: playerById(id).name,
+          points: pts[id] || 0,
+          delta: deltas[id],
+          coins: (rawStats[id] || {}).coins || 0,
+          reds: (rawStats[id] || {}).reds || 0,
+          fouls: (rawStats[id] || {}).fouls || 0,
+          won: blackWon,
+          lost: whiteWon
+        })),
+        white: [sel.whiteA, sel.whiteB].map((id) => ({
+          id,
+          name: playerById(id).name,
+          points: pts[id] || 0,
+          delta: deltas[id],
+          coins: (rawStats[id] || {}).coins || 0,
+          reds: (rawStats[id] || {}).reds || 0,
+          fouls: (rawStats[id] || {}).fouls || 0,
+          won: whiteWon,
+          lost: blackWon
+        })),
         scoreBlack: blackTotal,
         scoreWhite: whiteTotal
       };
@@ -746,6 +794,19 @@
           h("span", null, "\u26AB left: ", MAX_COLOR_COINS - coinsUsed.black, "/9"),
           h("span", null, "\u25CB left: ", MAX_COLOR_COINS - coinsUsed.white, "/9"),
           h("span", null, "\u{1F451} queen: ", coinsUsed.red >= MAX_QUEEN ? "taken" : "on board")
+        ),
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "center", marginBottom: 14 } },
+          h(
+            "button",
+            {
+              onClick: undoLast,
+              disabled: history.length === 0,
+              className: "btn btn--outline btn--sm"
+            },
+            "\u21A9 Undo last (" + history.length + "/3)"
+          )
         ),
         h(
           "div",
@@ -840,14 +901,18 @@
     return h(
       "div",
       { className: "player-scorer-card" },
-      h("div", { className: "player-scorer-card__name" }, player.name),
-      h("div", { className: "player-scorer-card__points" }, points),
+      h(
+        "div",
+        { className: "player-scorer-card__head" },
+        h("div", { className: "player-scorer-card__name" }, player.name),
+        h("div", { className: "player-scorer-card__points" }, points)
+      ),
       h(
         "div",
         { className: "player-scorer-card__actions" },
-        h("button", { onClick: onCoin, disabled: coinDisabled, className: "btn btn--primary btn--sm" }, "+1 coin"),
-        h("button", { onClick: onRed, disabled: redDisabled, className: "btn btn--danger btn--sm" }, "+2 queen"),
-        h("button", { onClick: onFoul, disabled: foulDisabled, className: "btn btn--outline btn--sm" }, "\u22122 foul")
+        h("button", { onClick: onCoin, disabled: coinDisabled, className: "btn btn--primary btn--sm" }, "+1"),
+        h("button", { onClick: onRed, disabled: redDisabled, className: "btn btn--danger btn--sm" }, "+2\u{1F451}"),
+        h("button", { onClick: onFoul, disabled: foulDisabled, className: "btn btn--outline btn--sm" }, "\u22122")
       )
     );
   }
@@ -865,14 +930,48 @@
   /* ==================================================================== *
    * History
    * ==================================================================== */
-  function HistoryView({ matches }) {
+  function HistoryView({ matches, players, savePlayers, saveMatches, isAdmin }) {
+    function deleteMatch(m) {
+      if (!window.confirm("Delete this match? This will undo its effect on ratings, W/L, and coin/red/foul totals.")) return;
+
+      const entries = [
+        ...m.black.map((e) => ({ ...e, team: "black" })),
+        ...m.white.map((e) => ({ ...e, team: "white" }))
+      ];
+
+      const nextPlayers = players.map((p) => {
+        const entry = entries.find((e) => (e.id ? e.id === p.id : e.name === p.name));
+        if (!entry) return p;
+
+        // Fall back to inferring win/loss from scores for older records saved before this field existed.
+        const isDraw = m.scoreBlack === m.scoreWhite;
+        const blackWon = m.scoreBlack > m.scoreWhite;
+        const won = "won" in entry ? entry.won : !isDraw && ((entry.team === "black") === blackWon);
+        const lost = "lost" in entry ? entry.lost : !isDraw && !won;
+
+        return {
+          ...p,
+          rating: p.rating - (entry.delta || 0),
+          played: Math.max(0, p.played - 1),
+          wins: Math.max(0, p.wins - (won ? 1 : 0)),
+          losses: Math.max(0, p.losses - (lost ? 1 : 0)),
+          totalCoins: Math.max(0, (p.totalCoins || 0) - (entry.coins || 0)),
+          totalReds: Math.max(0, (p.totalReds || 0) - (entry.reds || 0)),
+          totalFouls: Math.max(0, (p.totalFouls || 0) - (entry.fouls || 0))
+        };
+      });
+
+      savePlayers(nextPlayers);
+      saveMatches(matches.filter((x) => x.id !== m.id));
+    }
+
     if (matches.length === 0) {
       return h("div", { className: "panel-card empty-state" }, "No matches recorded yet. Play one from the New Match tab and it will show up here.");
     }
-    return h("div", null, matches.map((m) => h(HistoryCard, { key: m.id, m })));
+    return h("div", null, matches.map((m) => h(HistoryCard, { key: m.id, m, isAdmin, onDelete: () => deleteMatch(m) })));
   }
 
-  function HistoryCard({ m }) {
+  function HistoryCard({ m, isAdmin, onDelete }) {
     const date = new Date(m.date);
     const isDraw = m.scoreBlack === m.scoreWhite;
     const blackWon = m.scoreBlack > m.scoreWhite;
@@ -887,13 +986,18 @@
         "div",
         { className: "history-card__top" },
         h(
-          "span",
-          { className: "history-card__date" },
-          date.toLocaleDateString(void 0, { month: "short", day: "numeric", year: "numeric" }),
-          " \u00B7 ",
-          date.toLocaleTimeString(void 0, { hour: "2-digit", minute: "2-digit" })
+          "div",
+          null,
+          h(
+            "span",
+            { className: "history-card__date" },
+            date.toLocaleDateString(void 0, { month: "short", day: "numeric", year: "numeric" }),
+            " \u00B7 ",
+            date.toLocaleTimeString(void 0, { hour: "2-digit", minute: "2-digit" })
+          ),
+          h("span", { className: "history-card__result", style: { marginLeft: 8 } }, resultLabel, " \u00B7 ", m.scoreBlack, "\u2013", m.scoreWhite)
         ),
-        h("span", { className: "history-card__result" }, resultLabel, " \u00B7 ", m.scoreBlack, "\u2013", m.scoreWhite)
+        isAdmin && h("button", { onClick: onDelete, className: "icon-btn icon-btn--danger", title: "Delete match" }, "\u2716")
       ),
       h(
         "div",
