@@ -11,8 +11,8 @@
   const h = React.createElement;
   const { fsGetList, fsSetList, fsGetDoc, fsSetDoc } = window.FB;
 
-  const LOGO_SRC = "logo.jpg";
-  const DEFAULT_AVATAR = "default-avatar.png";
+  const LOGO_SRC = "images/logo.jpg";
+  const DEFAULT_AVATAR = "images/default-avatar.png";
   const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
   const MAX_COLOR_COINS = 9;
   const MAX_QUEEN = 1;
@@ -691,29 +691,42 @@
       const whiteWon = whiteTotal > blackTotal;
       const isDraw = blackTotal === whiteTotal;
 
-      // Win/loss bonus, based on the % gap between the two teams' average
-      // ratings:
-      //   - Fairly Equal match (gap < 33%): always +2 / -2, whoever wins.
-      //   - Favourite/Underdog match (33-66%): favourite winning (expected)
-      //     stays +2/-2; underdog pulling off the upset gets +4/-4.
-      //   - Heavy match (66%+): favourite winning (expected) stays +2/-2;
-      //     underdog pulling off the upset gets +5/-5.
+      // Win/loss bonus = a flat base of +2/-2, PLUS a "delta bonus" that only
+      // applies when the lower-rated (underdog) team wins by a gap over 10%:
+      //   Delta bonus (team total) = 10 x Gap%   (Gap% expressed as a fraction, e.g. 0.46 for 46%)
+      //   Split equally between the 2 players on each side, added to the
+      //   winner's +2 and subtracted from the loser's -2.
+      // If the higher-rated team wins, or the gap is 10% or under, no delta
+      // bonus applies - just the flat +2/-2.
       const avgBlackRating = (playerById(sel.blackA).rating + playerById(sel.blackB).rating) / 2;
       const avgWhiteRating = (playerById(sel.whiteA).rating + playerById(sel.whiteB).rating) / 2;
       const higherAvg = Math.max(avgBlackRating, avgWhiteRating);
       const lowerAvg = Math.min(avgBlackRating, avgWhiteRating);
-      const gapPct = ((higherAvg - lowerAvg) / Math.max(lowerAvg, 1)) * 100;
-      const blackIsFavourite = avgBlackRating >= avgWhiteRating;
-      const favouriteWon = blackIsFavourite ? blackWon : whiteWon;
+      const gapFraction = (higherAvg - lowerAvg) / Math.max(lowerAvg, 1);
+      const blackIsLower = avgBlackRating <= avgWhiteRating;
+      const lowerTeamWon = blackIsLower ? blackWon : whiteWon;
 
-      let magnitude;
-      if (gapPct < 33 || favouriteWon) {
-        magnitude = 2; // fairly equal, OR the expected side (favourite) won
-      } else {
-        magnitude = gapPct >= 66 ? 5 : 4; // underdog upset - reward scales with how big the gap was
+      let perPlayerDelta = 0;
+      if (!isDraw && gapFraction > 0.1 && lowerTeamWon) {
+        const deltaBonusTotal = 10 * gapFraction;
+        perPlayerDelta = deltaBonusTotal / 2;
       }
-      const blackBonus = isDraw ? 0 : blackWon ? magnitude : -magnitude;
-      const whiteBonus = isDraw ? 0 : whiteWon ? magnitude : -magnitude;
+
+      const blackBase = isDraw ? 0 : blackWon ? 2 : -2;
+      const whiteBase = isDraw ? 0 : whiteWon ? 2 : -2;
+      let blackBonus = blackBase;
+      let whiteBonus = whiteBase;
+      if (perPlayerDelta > 0) {
+        if (blackIsLower) {
+          blackBonus = blackBase + perPlayerDelta;
+          whiteBonus = whiteBase - perPlayerDelta;
+        } else {
+          whiteBonus = whiteBase + perPlayerDelta;
+          blackBonus = blackBase - perPlayerDelta;
+        }
+      }
+      blackBonus = Math.round(blackBonus);
+      whiteBonus = Math.round(whiteBonus);
       const ids = { blackA: sel.blackA, blackB: sel.blackB, whiteA: sel.whiteA, whiteB: sel.whiteB };
       const deltas = {};
       ["blackA", "blackB"].forEach((s) => (deltas[ids[s]] = (pts[ids[s]] || 0) + blackBonus));
