@@ -538,7 +538,10 @@
           h(Stat, { label: "Winning %", value: winPct(player) + "%" }),
           h(Stat, { label: "Coins taken", value: player.totalCoins || 0 }),
           h(Stat, { label: "Reds taken", value: player.totalReds || 0 }),
-          h(Stat, { label: "Fouls", value: player.totalFouls || 0 })
+          h(Stat, {
+            label: "Coins/Match",
+            value: player.played ? (((player.totalCoins || 0) + (player.totalReds || 0)) / player.played).toFixed(1) : "0.0"
+          })
         )
       )
     );
