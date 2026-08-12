@@ -12,7 +12,7 @@
   const { fsGetList, fsSetList, fsGetDoc, fsSetDoc } = window.FB;
 
   const LOGO_SRC = "images/logo.jpg";
-  const DEFAULT_AVATAR = "images/default-avatar.png";
+  const DEFAULT_AVATAR = "default-avatar.png";
   const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
   const MAX_COLOR_COINS = 9;
   const MAX_QUEEN = 1;
