@@ -21,6 +21,29 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
+  /* ------------------------------------------------------------------ *
+   * WhatsApp group notifications (via Whapi.Cloud, personal WhatsApp)
+   * Fires on: new challenge posted, challenge accepted.
+   * ------------------------------------------------------------------ */
+  const WHAPI_TOKEN = "FXRZtHGEyKWGnFCrFrMF7ttljp0GCaBP";
+  const WHAPI_GROUP_ID = "120363428015202052@g.us";
+  async function sendWhatsAppMessage(text) {
+    try {
+      const res = await fetch("https://gate.whapi.cloud/messages/text", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + WHAPI_TOKEN
+        },
+        body: JSON.stringify({ to: WHAPI_GROUP_ID, body: text })
+      });
+      if (!res.ok) console.warn("WhatsApp notify failed:", res.status, await res.text());
+    } catch (e) {
+      // Never let a notification failure break the app's own save/flow.
+      console.warn("WhatsApp notify error:", e.message);
+    }
+  }
+
   function initials(name) {
     if (!name) return "?";
     const parts = name.trim().split(/\s+/);
@@ -976,8 +999,8 @@
     const maximum=type==="open"?10:max(), used=[a1,a2,b1,b2].filter(Boolean);
     function select(value,setter,label,options){return h("select",{value,onChange:e=>setter(e.target.value),className:"form-select",style:{marginBottom:8}},h("option",{value:""},label),options.map(x=>h("option",{key:x.id,value:x.id},x.name)))}
     function opts(current){return eligible.filter(x=>x.id===current||!used.includes(x.id))}
-    function post(){const ids=type==="open"?[a1,a2]:[a1,a2,b1,b2],stake=parseInt(points,10);if(!ids.every(Boolean)||new Set(ids).size!==ids.length)return alert("Select different players for all positions.");if(!Number.isFinite(stake)||stake<1||stake>maximum)return alert("Choose 1 to "+maximum+" Challenge Points.");saveChallenges([{id:uid(),type,status:type==="open"?"OPEN":"PENDING",challenger:{p1:a1,p2:a2},opponent:{p1:type==="specific"?b1:null,p2:type==="specific"?b2:null},points:stake,message:message.trim(),createdAt:new Date().toISOString()},...challenges]);setA1("");setA2("");setB1("");setB2("");setPoints("1");setMessage("")}
-    function update(c,status,extra={}){saveChallenges(challenges.map(x=>x.id===c.id?{...x,...extra,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x))}
+    function post(){const ids=type==="open"?[a1,a2]:[a1,a2,b1,b2],stake=parseInt(points,10);if(!ids.every(Boolean)||new Set(ids).size!==ids.length)return alert("Select different players for all positions.");if(!Number.isFinite(stake)||stake<1||stake>maximum)return alert("Choose 1 to "+maximum+" Challenge Points.");const msg=message.trim();saveChallenges([{id:uid(),type,status:type==="open"?"OPEN":"PENDING",challenger:{p1:a1,p2:a2},opponent:{p1:type==="specific"?b1:null,p2:type==="specific"?b2:null},points:stake,message:msg,createdAt:new Date().toISOString()},...challenges]);sendWhatsAppMessage("\u{1F3AF} New "+(type==="open"?"Open":"Specific")+" Challenge Posted!\n"+player(a1).name+" + "+player(a2).name+(type==="specific"?" vs "+player(b1).name+" + "+player(b2).name:"")+"\nStake: "+stake+" CP"+(msg?"\nMessage: "+msg:""));setA1("");setA2("");setB1("");setB2("");setPoints("1");setMessage("")}
+    function update(c,status,extra={}){saveChallenges(challenges.map(x=>x.id===c.id?{...x,...extra,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x));if(status==="ACCEPTED"){const opp=extra.opponent||c.opponent;sendWhatsAppMessage("\u2705 Challenge Accepted!\n"+names(c.challenger)+" vs "+names(opp)+"\nStake: "+c.points+" CP"+(c.message?"\nMessage: "+c.message:""))}}
     function names(t){return t&&t.p1&&t.p2?player(t.p1).name+" + "+player(t.p2).name:"Awaiting counter-team"}
     return h("div",null,
       h("div",{className:"panel-card"},h("h2",{className:"panel-card__title"},"Create a Challenge"),h("div",{className:"match-type-toggle"},["open","specific"].map(x=>h("button",{key:x,onClick:()=>{setType(x);setPoints("1")},className:"match-type-toggle__btn"+(type===x?" match-type-toggle__btn--active":"")},x==="open"?"Open Challenge":"Specific Challenge"))),h("p",{className:"panel-card__hint"},type==="open"?"Anyone may accept. Maximum 10 CP.":"Choose both teams. Maximum 5 CP, based on Challenge-rank gap."),h("div",{className:"team-grid"},h("div",null,h("b",null,"Challenger Team"),select(a1,setA1,"Player 1",opts(a1)),select(a2,setA2,"Player 2",opts(a2))),type==="specific"&&h("div",null,h("b",null,"Challenged Team"),select(b1,setB1,"Player 1",opts(b1)),select(b2,setB2,"Player 2",opts(b2)))),h("div",{className:"form-grid"},h("div",{className:"form-row"},h("label",{className:"form-label"},"Challenge Points, max "+maximum),h("input",{type:"number",min:1,max:maximum,value:points,onChange:e=>setPoints(e.target.value),className:"form-input"})),h("div",{className:"form-row"},h("label",{className:"form-label"},"Message"),h("input",{value:message,onChange:e=>setMessage(e.target.value),className:"form-input"}))),h("button",{onClick:post,className:"btn btn--gold btn--block"},type==="open"?"Post Open Challenge":"Send Specific Challenge")),
