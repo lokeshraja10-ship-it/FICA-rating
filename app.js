@@ -3,24 +3,19 @@
    UI/UX only. Firestore access, rating math, and admin-PIN logic are
    unchanged from the original app (now living in firebase.js).
    ========================================================================== */
-
 (function () {
   "use strict";
-
   const { useState, useEffect, useRef, useLayoutEffect } = React;
   const h = React.createElement;
   const { fsGetList, fsSetList, fsGetDoc, fsSetDoc } = window.FB;
-
   const LOGO_SRC = "images/logo.jpg";
   const DEFAULT_AVATAR = "images/default-avatar.png";
   const MEDALS = ["\u{1F947}", "\u{1F948}", "\u{1F949}"];
   const MAX_COLOR_COINS = 9;
   const MAX_QUEEN = 1;
-
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
-
   /* ------------------------------------------------------------------ *
    * WhatsApp group notifications (via Whapi.Cloud, personal WhatsApp)
    * Fires on: new challenge posted, challenge accepted.
@@ -43,32 +38,27 @@
       console.warn("WhatsApp notify error:", e.message);
     }
   }
-
   function initials(name) {
     if (!name) return "?";
     const parts = name.trim().split(/\s+/);
     return ((parts[0][0] || "") + (parts[1] ? parts[1][0] : "")).toUpperCase();
   }
-
   function winPct(p) {
     if (!p.played) return 0;
     return Math.round((p.wins / p.played) * 100);
   }
-
   // A player counts as "registration paid" unless explicitly marked false.
   // This keeps existing data (saved before this field existed) working as
   // before, while letting an admin uncheck specific players going forward.
   function isPaid(p) {
     return p.registrationPaid !== false;
   }
-
   /* ------------------------------------------------------------------ *
    * Avatar — falls back: given photo -> default-avatar.png -> initials
    * ------------------------------------------------------------------ */
   function Avatar({ src, name, className }) {
     const [stage, setStage] = useState(src ? 0 : 1);
     useEffect(() => { setStage(src ? 0 : 1); }, [src]);
-
     if (stage >= 2) {
       return h("div", { className: (className || "") + " avatar-initials" }, initials(name));
     }
@@ -80,7 +70,6 @@
       onError: () => setStage((s) => (s === 0 ? 1 : 2))
     });
   }
-
   /* ==================================================================== *
    * Root
    * ==================================================================== */
@@ -97,7 +86,6 @@
     const [adminPin, setAdminPin] = useState(void 0);
     const [isAdmin, setIsAdmin] = useState(false);
     const editingRef = useRef(false);
-
     async function loadAdminPin() {
       try {
         const config = await fsGetDoc("config");
@@ -121,7 +109,6 @@
     function signOut() {
       setIsAdmin(false);
     }
-
     async function refresh() {
       try {
         const [p, m, t, c, l] = await Promise.all([fsGetList("players"), fsGetList("matches"), fsGetList("tournaments"), fsGetList("challenges"), fsGetList("challengeLedger")]);
@@ -134,14 +121,12 @@
         setLoaded(true);
       }
     }
-
     useEffect(() => {
       refresh();
       loadAdminPin();
       const interval = setInterval(refresh, 6000);
       return () => clearInterval(interval);
     }, []);
-
     async function savePlayers(next) {
       setPlayers(next);
       try {
@@ -172,7 +157,6 @@
     async function saveChallenges(next) { setChallenges(next); try { await fsSetList("challenges", next); setConnError(null); } catch(e) { setConnError(e.message); } }
     async function saveChallengeLedger(next) { setChallengeLedger(next); try { await fsSetList("challengeLedger", next); setConnError(null); } catch(e) { setConnError(e.message); } }
     function startAcceptedChallenge(id) { setActiveChallengeId(id); setView("match"); }
-
     return h(
       "div",
       { className: "app-shell" },
@@ -190,14 +174,13 @@
           : view === "challenges"
           ? h(ChallengesView, { players, challenges, saveChallenges, challengeLedger, onStartChallenge: startAcceptedChallenge, isAdmin })
           : view === "challengeLeaders"
-          ? h(ChallengeLeaderboard, { players, challengeLedger })
+          ? h(ChallengeLeaderboard, { players, challengeLedger, saveChallengeLedger, isAdmin })
           : view === "history"
           ? h(HistoryView, { matches, players, savePlayers, saveMatches, isAdmin })
           : h(StandingsView, { tournaments, matches })
       )
     );
   }
-
   /* ==================================================================== *
    * Header + Tabs (animated underline)
    * ==================================================================== */
@@ -205,7 +188,6 @@
     const [showBox, setShowBox] = useState(false);
     const [pinInput, setPinInput] = useState("");
     const [err, setErr] = useState("");
-
     function submit() {
       setErr("");
       if (adminPin === null) {
@@ -223,7 +205,6 @@
         setPinInput("");
       }
     }
-
     return h(
       "div",
       { className: "site-header no-print" },
@@ -288,7 +269,6 @@
       h(TabBar, { view, setView })
     );
   }
-
   function TabBar({ view, setView }) {
     const tabs = [
       { id: "players", label: "Rankings" },
@@ -300,22 +280,18 @@
     ];
     const btnRefs = useRef({});
     const [underline, setUnderline] = useState({ left: 0, width: 0 });
-
     function measure() {
       const btn = btnRefs.current[view];
       if (btn) setUnderline({ left: btn.offsetLeft, width: btn.offsetWidth });
     }
-
     useLayoutEffect(() => {
       measure();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [view]);
-
     useEffect(() => {
       window.addEventListener("resize", measure);
       return () => window.removeEventListener("resize", measure);
     }, [view]);
-
     return h(
       "div",
       { className: "tabs" },
@@ -334,7 +310,6 @@
       h("span", { className: "tab-underline", style: { left: underline.left, width: underline.width } })
     );
   }
-
   /* ==================================================================== *
    * Rankings
    * ==================================================================== */
@@ -350,12 +325,10 @@
     const [search, setSearch] = useState("");
     const [openPlayerId, setOpenPlayerId] = useState(null);
     const [compareOpen, setCompareOpen] = useState(false);
-
     useEffect(() => {
       editingRef.current =
         ratingEditId !== null || !!editingPlayer || bulkText.length > 0 || name.length > 0;
     }, [ratingEditId, editingPlayer, bulkText, name]);
-
     function addBulk() {
       const lines = bulkText.split("\n").map((l) => l.trim()).filter(Boolean);
       if (!lines.length) return;
@@ -379,7 +352,6 @@
       savePlayers([...players, ...additions]);
       setBulkText("");
     }
-
     function addSingle() {
       if (!name.trim()) return;
       const r = parseInt(rating, 10);
@@ -404,16 +376,13 @@
       setPhoto("");
       setPaidChecked(true);
     }
-
     function deletePlayer(id) {
       savePlayers(players.filter((p) => p.id !== id));
       if (openPlayerId === id) setOpenPlayerId(null);
     }
-
     function togglePaid(id) {
       savePlayers(players.map((p) => (p.id === id ? { ...p, registrationPaid: !isPaid(p) } : p)));
     }
-
     function startRatingEdit(p) {
       setRatingEditId(p.id);
       setEditRating(String(p.rating));
@@ -423,19 +392,16 @@
       savePlayers(players.map((p) => (p.id === id ? { ...p, rating: Number.isFinite(r) ? r : p.rating } : p)));
       setRatingEditId(null);
     }
-
     function saveEditedPlayer(updated) {
       savePlayers(players.map((p) => (p.id === updated.id ? { ...p, ...updated } : p)));
       setEditingPlayer(null);
     }
-
     const ranked = [...players].sort((a, b) => b.rating - a.rating);
     const visible = search.trim()
       ? ranked.filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()))
       : ranked;
     const openPlayer = openPlayerId ? players.find((p) => p.id === openPlayerId) : null;
     const openPlayerRank = openPlayer ? ranked.findIndex((p) => p.id === openPlayer.id) : -1;
-
     return h(
       "div",
       null,
@@ -496,7 +462,6 @@
             h("button", { onClick: addSingle, className: "btn btn--gold" }, "Save")
           )
         : h("div", { className: "panel-card no-print" }, h("p", { className: "panel-card__hint" }, "Sign in as admin (top right) to add or edit players.")),
-
       h(
         "div",
         { className: "rankings-title-row no-print" },
@@ -509,7 +474,6 @@
         )
       ),
       h("h2", { className: "section-title print-only" }, "Rankings"),
-
       h(
         "div",
         { className: "search-bar no-print" },
@@ -521,7 +485,6 @@
           className: "search-input"
         })
       ),
-
       visible.length === 0
         ? h("div", { className: "panel-card empty-state" }, players.length === 0 ? "No players yet. Add your current rating list above to start the board." : "No players match your search.")
         : h(
@@ -546,13 +509,11 @@
               });
             })
           ),
-
       openPlayer && h(PlayerModal, { player: openPlayer, rank: openPlayerRank, matches, onClose: () => setOpenPlayerId(null) }),
       editingPlayer && h(EditPlayerModal, { player: editingPlayer, onCancel: () => setEditingPlayer(null), onSave: saveEditedPlayer }),
       compareOpen && h(CompareModal, { players, matches, onClose: () => setCompareOpen(false) })
     );
   }
-
   function PlayerCard({ player: p, rank, isAdmin, editing, editRating, setEditRating, onOpen, onStartRatingEdit, onSaveRatingEdit, onEditPlayer, onDelete, onTogglePaid }) {
     const medal = null;
     const paid = isPaid(p);
@@ -619,7 +580,6 @@
       )
     );
   }
-
   function RankChangeArrow({ current, prev }) {
     if (prev === undefined || prev === null || prev === current) return null;
     const movedUp = current < prev; // lower index = higher on the leaderboard
@@ -629,7 +589,6 @@
       movedUp ? "\u25B2" : "\u25BC"
     );
   }
-
   /* ---- Shared helpers for player performance features ---- */
   function getPlayerMatches(matches, playerId) {
     const list = [];
@@ -656,7 +615,6 @@
     list.sort((a, b) => new Date(a.date) - new Date(b.date));
     return list;
   }
-
   function computeRatingHistory(player, matches) {
     const pm = getPlayerMatches(matches, player.id);
     const totalDelta = pm.reduce((sum, x) => sum + x.delta, 0);
@@ -668,7 +626,6 @@
     });
     return points;
   }
-
   function computeLongestWinStreak(playerMatches) {
     let longest = 0;
     let current = 0;
@@ -682,7 +639,6 @@
     });
     return longest;
   }
-
   function computeBestPartner(playerMatches) {
     const byPartner = {};
     playerMatches.forEach((x) => {
@@ -697,7 +653,6 @@
     const best = list[0];
     return { name: best.name, played: best.played, wins: best.wins, winPct: Math.round((best.wins / best.played) * 100) };
   }
-
   function computeBadges(player, playerMatches) {
     const badges = [];
     if (player.played >= 1) badges.push({ icon: "\u{1F396}\uFE0F", label: "First Match" });
@@ -710,7 +665,6 @@
     if ((player.totalCoins || 0) >= 50) badges.push({ icon: "\u{1FA99}", label: "Coin Master" });
     return badges;
   }
-
   function RatingGraph({ points }) {
     if (points.length < 2) return h("p", { className: "panel-card__hint" }, "Not enough match history yet for a graph.");
     const width = 280;
@@ -735,14 +689,12 @@
       h("circle", { cx: last[0], cy: last[1], r: 3, fill: "#A32F26" })
     );
   }
-
   function PlayerModal({ player, rank, matches, onClose }) {
     const playerMatches = getPlayerMatches(matches, player.id);
     const ratingHistory = computeRatingHistory(player, matches);
     const badges = computeBadges(player, playerMatches);
     const bestPartner = computeBestPartner(playerMatches);
     const paid = isPaid(player);
-
     return h(
       "div",
       { className: "modal-overlay", onClick: onClose },
@@ -798,14 +750,12 @@
   function Stat({ label, value }) {
     return h("div", { className: "modal__stat" }, h("div", { className: "modal__stat-label" }, label), h("div", { className: "modal__stat-value" }, value));
   }
-
   function CompareModal({ players, matches, onClose }) {
     const [idA, setIdA] = useState("");
     const [idB, setIdB] = useState("");
     const comparablePlayers = players.filter(isPaid);
     const playerA = comparablePlayers.find((p) => p.id === idA);
     const playerB = comparablePlayers.find((p) => p.id === idB);
-
     function headToHead() {
       if (!playerA || !playerB) return null;
       let aWins = 0;
@@ -825,7 +775,6 @@
       return { aWins, bWins, draws, total: aWins + bWins + draws };
     }
     const record = headToHead();
-
     function row(label, va, vb) {
       return h(
         "div",
@@ -835,7 +784,6 @@
         h("div", { className: "compare-row__val" }, vb)
       );
     }
-
     return h(
       "div",
       { className: "modal-overlay", onClick: onClose },
@@ -887,15 +835,11 @@
       )
     );
   }
-
-
-
   function EditPlayerModal({ player, onCancel, onSave }) {
     const [name, setName] = useState(player.name);
     const [rating, setRating] = useState(String(player.rating));
     const [photo, setPhoto] = useState(player.photo || "");
     const [paidChecked, setPaidChecked] = useState(isPaid(player));
-
     function submit() {
       const r = parseInt(rating, 10);
       onSave({
@@ -906,7 +850,6 @@
         registrationPaid: paidChecked
       });
     }
-
     return h(
       "div",
       { className: "modal-overlay", onClick: onCancel },
@@ -957,20 +900,27 @@
       )
     );
   }
-
-
   /* Challenge Mode */
   function challengeStats(players, ledger) {
     const map={}; players.forEach(p=>map[p.id]={player:p,points:0,played:0,wins:0,losses:0,draws:0});
     ledger.filter(x=>!x.reversed).forEach(e=>(e.changes||[]).forEach(c=>{const r=map[c.playerId];if(!r)return;const n=Number(c.points)||0;r.points+=n;r.played++;if(n>0)r.wins++;else if(n<0)r.losses++;else r.draws++;}));
     return Object.values(map).sort((a,b)=>b.points-a.points||b.wins-a.wins||b.played-a.played||a.player.name.localeCompare(b.player.name));
   }
-  function ChallengeLeaderboard({ players, challengeLedger }) {
+  function ChallengeLeaderboard({ players, challengeLedger, saveChallengeLedger, isAdmin }) {
     const rows = challengeStats(players.filter(isPaid), challengeLedger);
+    function resetLeaderboard() {
+      if (!window.confirm("Reset the Challenge Leaderboard? This clears all Challenge Points, wins, losses and draws for everyone. Challenges themselves (posted/accepted cards) are not affected, and this cannot be undone.")) return;
+      saveChallengeLedger([]);
+    }
     return h(
       "div", null,
       h("div", { className: "panel-card" },
-        h("h2", { className: "panel-card__title" }, "Challenge Leaders"),
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 } },
+          h("h2", { className: "panel-card__title", style: { marginBottom: 0 } }, "Challenge Leaders"),
+          isAdmin && h("button", { onClick: resetLeaderboard, className: "btn btn--outline btn--sm no-print" }, "\u21BB Reset Leaderboard")
+        ),
         h("p", { className: "panel-card__hint" }, "Challenge Points are separate from regular ratings.")
       ),
       h("div", { className: "panel-card standings-table-wrap" },
@@ -1024,7 +974,6 @@
       live.length===0?h("div",{className:"panel-card empty-state"},"No live challenges available."):live.map(c=>h("div",{key:c.id,className:"panel-card challenge-card"},h("div",{className:"challenge-head"},h("strong",null,c.type==="open"?"OPEN CHALLENGE":"SPECIFIC CHALLENGE"),h("span",{className:"challenge-cp"},c.points," CP"),isAdmin&&h("button",{onClick:()=>remove(c),className:"icon-btn icon-btn--danger",title:"Delete challenge"},"\u2716")),h("p",null,names(c.challenger)," vs ",names(c.opponent)),c.message&&h("p",{className:"panel-card__hint"},c.message),h("b",null,c.status),c.type==="open"&&c.status==="OPEN"&&h("div",{className:"challenge-counter"},select((counter[c.id]||{}).p1,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p1:v}}),"Counter player 1",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p2].includes(x.id))),select((counter[c.id]||{}).p2,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p2:v}}),"Counter player 2",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p1].includes(x.id))),h("button",{disabled:!!busy[c.id],onClick:()=>{const t=counter[c.id]||{};if(!t.p1||!t.p2)return alert("Select two counter-team players.");guardedUpdate(c,"ACCEPTED",{opponent:{p1:t.p1,p2:t.p2}})},className:"btn btn--primary btn--sm"},"Accept")),c.type==="specific"&&c.status==="PENDING"&&h("div",{className:"match-actions"},h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"ACCEPTED"),className:"btn btn--primary"},"Accept"),h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"REJECTED"),className:"btn btn--danger"},"Reject")),c.status==="ACCEPTED"&&h("button",{onClick:()=>onStartChallenge(c.id),className:"btn btn--gold btn--block"},"Start Match"),["OPEN","PENDING"].includes(c.status)&&h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"CANCELLED"),className:"link-btn"},"Cancel challenge")))
     )
   }
-
   /* ==================================================================== *
    * New Match
    * ==================================================================== */
@@ -1046,10 +995,8 @@
     const [teamBlackId, setTeamBlackId] = useState("");
     const [teamWhiteId, setTeamWhiteId] = useState("");
     const [matchMeta, setMatchMeta] = useState(null); // captured at start(): { tournamentId, tournamentName, blackTeamName, whiteTeamName } or null for friendly
-
     const selectedTournament = tournaments.find((t) => t.id === tourId) || null;
     const activeChallenge = challenges.find((c) => c.id === activeChallengeId && c.status === "ACCEPTED") || null;
-
     // In tournament mode, derive the effective player selection directly from
     // the chosen teams at render time (not via a separate effect+state sync,
     // which could race with canStart()/OddsPanel rendering before it catches up).
@@ -1066,10 +1013,8 @@
       };
     }
     const effectiveSel = computeEffectiveSel();
-
     const slots = ["blackA", "blackB", "whiteA", "whiteB"];
     const chosenIds = slots.map((s) => sel[s]).filter(Boolean);
-
     function optionsFor(slot) {
       return eligiblePlayers.filter((p) => p.id === sel[slot] || !chosenIds.includes(p.id));
     }
@@ -1169,7 +1114,6 @@
     function playerById(id) {
       return players.find((p) => p.id === id);
     }
-
     // A team wins by emptying all 9 of their own coins, with the queen accounted
     // for (taken by either side) - this is the real carrom win condition, not
     // whoever has more points. Always computed fresh from the current board
@@ -1196,10 +1140,8 @@
       if (blackResult && whiteResult) return blackResult === whiteResult ? blackResult : null; // both finished with conflicting outcomes - ambiguous, fall back to points
       return blackResult || whiteResult || null;
     }
-
     const blackTotal = (pts[sel.blackA] || 0) + (pts[sel.blackB] || 0);
     const whiteTotal = (pts[sel.whiteA] || 0) + (pts[sel.whiteB] || 0);
-
     function finish() {
       // Real carrom win condition: whoever empties their 9 coins (with the
       // queen accounted for) wins - not whoever has more points. Points only
@@ -1208,7 +1150,6 @@
       const blackWon = finisher ? finisher === "black" : blackTotal > whiteTotal;
       const whiteWon = finisher ? finisher === "white" : whiteTotal > blackTotal;
       const isDraw = !finisher && blackTotal === whiteTotal;
-
       // Win/loss bonus = a flat base of +2/-2, PLUS a "delta bonus" that only
       // applies when the lower-rated (underdog) team wins by a gap over 10%:
       //   Delta bonus (team total) = 10 x Gap%   (Gap% expressed as a fraction, e.g. 0.46 for 46%)
@@ -1223,13 +1164,11 @@
       const gapFraction = (higherAvg - lowerAvg) / Math.max(lowerAvg, 1);
       const blackIsLower = avgBlackRating <= avgWhiteRating;
       const lowerTeamWon = blackIsLower ? blackWon : whiteWon;
-
       let perPlayerDelta = 0;
       if (!isDraw && gapFraction > 0.1 && lowerTeamWon) {
         const deltaBonusTotal = 10 * gapFraction;
         perPlayerDelta = deltaBonusTotal / 2;
       }
-
       const blackBase = isDraw ? 0 : blackWon ? 2 : -2;
       const whiteBase = isDraw ? 0 : whiteWon ? 2 : -2;
       let blackBonus = blackBase;
@@ -1256,7 +1195,6 @@
       rankedBefore.forEach((p, i) => {
         prevRankMap[p.id] = i;
       });
-
       const nextPlayers = players.map((p) => {
         if (!(p.id in deltas)) return { ...p, prevRank: prevRankMap[p.id] };
         const isBlack = p.id === sel.blackA || p.id === sel.blackB;
@@ -1333,7 +1271,6 @@
       setMatchMeta(null);
       setSummary(null);
     }
-
     if (eligiblePlayers.length < 4) {
       return h(
         "div",
@@ -1347,7 +1284,6 @@
         )
       );
     }
-
     if (summary) {
       // Use the actual recorded winner (based on who finished their coins),
       // not raw points - only fall back to comparing scores for older records
@@ -1373,7 +1309,6 @@
         )
       );
     }
-
     if (started) {
       const black = [playerById(sel.blackA), playerById(sel.blackB)];
       const white = [playerById(sel.whiteA), playerById(sel.whiteB)];
@@ -1468,12 +1403,10 @@
         )
       );
     }
-
     return h(
       "div",
       { className: "panel-card" },
       isAdmin && h(TournamentManager, { players: eligiblePlayers, tournaments, saveTournaments }),
-
       h("h2", { className: "panel-card__title" }, "Pick players"),
       h(
         "div",
@@ -1508,7 +1441,6 @@
         : activeChallenge
         ? h("div", { className:"challenge-match-banner" }, h("strong", null, "Challenge Match · ", activeChallenge.points, " CP"), h("div", null, playerById(activeChallenge.challenger.p1).name, " + ", playerById(activeChallenge.challenger.p2).name, " vs ", playerById(activeChallenge.opponent.p1).name, " + ", playerById(activeChallenge.opponent.p2).name))
         : h("p", { className:"panel-card__hint" }, "Accept a challenge from the Challenges tab, then select Start Match."),
-
       canStart() && h(OddsPanel, { black: [playerById(effectiveSel.blackA), playerById(effectiveSel.blackB)], white: [playerById(effectiveSel.whiteA), playerById(effectiveSel.whiteB)] }),
       h(
         "button",
@@ -1517,18 +1449,15 @@
       )
     );
   }
-
   function TournamentMatchPicker({ tournaments, tourId, setTourId, teamBlackId, setTeamBlackId, teamWhiteId, setTeamWhiteId, playerById }) {
     const tournament = tournaments.find((t) => t.id === tourId) || null;
     const teams = tournament ? tournament.teams : [];
-
     function teamLabel(team) {
       if (!team) return "";
       const p1 = playerById(team.p1);
       const p2 = playerById(team.p2);
       return team.name + " (" + (p1 ? p1.name : "?") + " + " + (p2 ? p2.name : "?") + ")";
     }
-
     if (tournaments.length === 0) {
       return h(
         "div",
@@ -1536,7 +1465,6 @@
         "No tournaments yet. Ask an admin to create one (button above) with at least two teams."
       );
     }
-
     return h(
       "div",
       null,
@@ -1594,7 +1522,6 @@
             ))
     );
   }
-
   function TournamentManager({ players, tournaments, saveTournaments }) {
     const [open, setOpen] = useState(false);
     const [newTourName, setNewTourName] = useState("");
@@ -1602,7 +1529,6 @@
     const [teamName, setTeamName] = useState("");
     const [teamP1, setTeamP1] = useState("");
     const [teamP2, setTeamP2] = useState("");
-
     function addTournament() {
       if (!newTourName.trim()) return;
       const t = { id: uid(), name: newTourName.trim(), teams: [] };
@@ -1629,13 +1555,11 @@
       const next = tournaments.map((t) => (t.id === tourId ? { ...t, teams: t.teams.filter((tm) => tm.id !== teamId) } : t));
       saveTournaments(next);
     }
-
     const activeTour = tournaments.find((t) => t.id === activeTourId) || null;
     const usedPlayerIds = activeTour ? activeTour.teams.flatMap((tm) => [tm.p1, tm.p2]) : [];
     function playerOptions(current) {
       return players.filter((p) => p.id === current || !usedPlayerIds.includes(p.id));
     }
-
     return h(
       "div",
       { className: "panel-card", style: { background: "var(--bg)" } },
@@ -1743,7 +1667,6 @@
         )
     );
   }
-
   function OddsPanel({ black, white }) {
     if (!black[0] || !black[1] || !white[0] || !white[1]) return null; // players not fully resolved yet - render nothing rather than crash
     const avgBlack = (black[0].rating + black[1].rating) / 2;
@@ -1753,18 +1676,15 @@
     const gapPct = ((higherAvg - lowerAvg) / Math.max(lowerAvg, 1)) * 100;
     const isFairlyEqual = gapPct <= 10;
     const blackIsFavourite = avgBlack >= avgWhite;
-
     function underdogLabel() {
       if (gapPct > 75) return "Ultra Pro Max Dog";
       if (gapPct > 50) return "Ultra Dog";
       return "Underdog";
     }
-
     const rows = [
       { team: "\u26AB Team Black", avg: avgBlack, isFav: blackIsFavourite },
       { team: "\u25CB Team White", avg: avgWhite, isFav: !blackIsFavourite }
     ];
-
     return h(
       "div",
       { className: "odds-panel" },
@@ -1788,7 +1708,6 @@
       h("div", { className: "odds-panel__gap" }, "Gap: ", gapPct.toFixed(0), "%")
     );
   }
-
   function TeamPicker({ label, slotA, slotB, sel, setSel, optionsFor }) {
     return h(
       "div",
@@ -1810,7 +1729,6 @@
       )
     );
   }
-
   function PlayerScorer({ player, points, coinDisabled, redDisabled, foulDisabled, onCoin, onRed, onFoul }) {
     return h(
       "div",
@@ -1830,7 +1748,6 @@
       )
     );
   }
-
   function DeltaRow({ pl }) {
     const positive = pl.delta > 0;
     return h(
@@ -1840,23 +1757,19 @@
       h("div", { className: "delta-row__delta " + (positive ? "delta-row__delta--pos" : "delta-row__delta--neg") }, positive ? "+" : "", pl.delta)
     );
   }
-
   /* ==================================================================== *
    * History
    * ==================================================================== */
   function HistoryView({ matches, players, savePlayers, saveMatches, isAdmin }) {
     function deleteMatch(m) {
       if (!window.confirm("Delete this match? This will undo its effect on ratings, W/L, and coin/red/foul totals.")) return;
-
       const entries = [
         ...m.black.map((e) => ({ ...e, team: "black" })),
         ...m.white.map((e) => ({ ...e, team: "white" }))
       ];
-
       const nextPlayers = players.map((p) => {
         const entry = entries.find((e) => (e.id ? e.id === p.id : e.name === p.name));
         if (!entry) return p;
-
         // Fall back to inferring win/loss from the recorded winner (or, for very
         // old records saved before that field existed, from scores).
         const winnerSide = m.winner || (m.scoreBlack === m.scoreWhite ? "draw" : m.scoreBlack > m.scoreWhite ? "black" : "white");
@@ -1864,7 +1777,6 @@
         const blackWon = winnerSide === "black";
         const won = "won" in entry ? entry.won : !isDraw && ((entry.team === "black") === blackWon);
         const lost = "lost" in entry ? entry.lost : !isDraw && !won;
-
         return {
           ...p,
           rating: p.rating - (entry.delta || 0),
@@ -1876,17 +1788,14 @@
           totalFouls: Math.max(0, (p.totalFouls || 0) - (entry.fouls || 0))
         };
       });
-
       savePlayers(nextPlayers);
       saveMatches(matches.filter((x) => x.id !== m.id));
     }
-
     if (matches.length === 0) {
       return h("div", { className: "panel-card empty-state" }, "No matches recorded yet. Play one from the New Match tab and it will show up here.");
     }
     return h("div", null, matches.map((m) => h(HistoryCard, { key: m.id, m, isAdmin, onDelete: () => deleteMatch(m) })));
   }
-
   function HistoryCard({ m, isAdmin, onDelete }) {
     const date = new Date(m.date);
     // Use the actual recorded winner (based on who finished their coins), not
@@ -1898,7 +1807,6 @@
     const resultLabel = isDraw ? "Draw" : blackWon ? "\u26AB Black won" : "\u25CB White won";
     const winnerTeam = isDraw ? null : blackWon ? { label: "\u26AB Winner", players: m.black } : { label: "\u25CB Winner", players: m.white };
     const loserTeam = isDraw ? null : blackWon ? { label: "\u25CB Loser", players: m.white } : { label: "\u26AB Loser", players: m.black };
-
     return h(
       "div",
       { className: "panel-card" },
@@ -1942,7 +1850,6 @@
       )
     );
   }
-
   /* ==================================================================== *
    * Standings (tournament league table)
    * Win = +5 points, Draw = +2 points, Loss = +0. REF column = total reds
@@ -1951,11 +1858,9 @@
   function StandingsView({ tournaments, matches }) {
     const [tourId, setTourId] = useState(tournaments.length === 1 ? tournaments[0].id : "");
     const tournament = tournaments.find((t) => t.id === tourId) || null;
-
     if (tournaments.length === 0) {
       return h("div", { className: "panel-card empty-state" }, "No tournaments yet. An admin can create one from the New Match screen.");
     }
-
     const rows = tournament
       ? tournament.teams.map((team) => {
           const row = { name: team.name, played: 0, won: 0, lost: 0, draw: 0, points: 0, reds: 0 };
@@ -1981,7 +1886,6 @@
         })
       : [];
     rows.sort((a, b) => b.points - a.points || b.reds - a.reds);
-
     return h(
       "div",
       null,
@@ -2047,7 +1951,6 @@
             ))
     );
   }
-
   const challengeStyle=document.createElement("style");challengeStyle.textContent=`.tabs{overflow-x:auto}.tab-btn{min-width:110px}.challenge-card{border-left:5px solid var(--gold)}.challenge-head{display:flex;justify-content:space-between}.challenge-cp{background:var(--ink);color:var(--gold-light);border-radius:999px;padding:5px 10px}.challenge-counter{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:12px}.challenge-match-banner{padding:15px;background:#fff4cf;border:1px solid var(--gold);border-radius:16px;text-align:center}@media(max-width:640px){.challenge-counter{grid-template-columns:1fr}}`;document.head.appendChild(challengeStyle);
   ReactDOM.createRoot(document.getElementById("root")).render(h(CarromRatings, null));
 })();
