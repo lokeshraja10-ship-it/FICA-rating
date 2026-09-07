@@ -101,15 +101,9 @@
 
     async function refresh() {
       try {
-        const [p, m, t, c, l] = await Promise.all([
-          fsGetList("players"), fsGetList("matches"), fsGetList("tournaments"),
-          fsGetList("challenges"), fsGetList("challengeLedger")
-        ]);
+        const [p, m, t, c, l] = await Promise.all([fsGetList("players"), fsGetList("matches"), fsGetList("tournaments"), fsGetList("challenges"), fsGetList("challengeLedger")]);
         if (!editingRef.current) setPlayers(p);
-        setMatches(m);
-        setTournaments(t);
-        setChallenges(c);
-        setChallengeLedger(l);
+        setMatches(m); setTournaments(t); setChallenges(c); setChallengeLedger(l);
         setConnError(null);
       } catch (e) {
         setConnError(e.message);
@@ -152,20 +146,9 @@
         setConnError(e.message);
       }
     }
-    async function saveChallenges(next) {
-      setChallenges(next);
-      try { await fsSetList("challenges", next); setConnError(null); }
-      catch (e) { setConnError(e.message); }
-    }
-    async function saveChallengeLedger(next) {
-      setChallengeLedger(next);
-      try { await fsSetList("challengeLedger", next); setConnError(null); }
-      catch (e) { setConnError(e.message); }
-    }
-    function startAcceptedChallenge(id) {
-      setActiveChallengeId(id);
-      setView("match");
-    }
+    async function saveChallenges(next) { setChallenges(next); try { await fsSetList("challenges", next); setConnError(null); } catch(e) { setConnError(e.message); } }
+    async function saveChallengeLedger(next) { setChallengeLedger(next); try { await fsSetList("challengeLedger", next); setConnError(null); } catch(e) { setConnError(e.message); } }
+    function startAcceptedChallenge(id) { setActiveChallengeId(id); setView("match"); }
 
     return h(
       "div",
@@ -953,86 +936,54 @@
   }
 
 
-  /* ==================================================================== *
-   * Challenge Mode
-   * ==================================================================== */
+  /* Challenge Mode */
   function challengeStats(players, ledger) {
-    const map = {};
-    players.forEach((p) => { map[p.id] = { player: p, points: 0, played: 0, wins: 0, losses: 0, draws: 0 }; });
-    ledger.filter((x) => !x.reversed).forEach((entry) => {
-      (entry.changes || []).forEach((change) => {
-        const s = map[change.playerId]; if (!s) return;
-        s.points += Number(change.points) || 0; s.played += 1;
-        if (change.points > 0) s.wins += 1; else if (change.points < 0) s.losses += 1; else s.draws += 1;
-      });
-    });
-    return Object.values(map).sort((a,b) => b.points-a.points || b.wins-a.wins || (b.played ? b.wins/b.played : 0)-(a.played ? a.wins/a.played : 0) || b.played-a.played || a.player.name.localeCompare(b.player.name));
+    const map={}; players.forEach(p=>map[p.id]={player:p,points:0,played:0,wins:0,losses:0,draws:0});
+    ledger.filter(x=>!x.reversed).forEach(e=>(e.changes||[]).forEach(c=>{const r=map[c.playerId];if(!r)return;const n=Number(c.points)||0;r.points+=n;r.played++;if(n>0)r.wins++;else if(n<0)r.losses++;else r.draws++;}));
+    return Object.values(map).sort((a,b)=>b.points-a.points||b.wins-a.wins||b.played-a.played||a.player.name.localeCompare(b.player.name));
   }
-
   function ChallengeLeaderboard({ players, challengeLedger }) {
     const rows = challengeStats(players.filter(isPaid), challengeLedger);
-    return h("div", null,
-      h("div", { className: "panel-card" }, h("h2", { className: "panel-card__title" }, "⚔ Challenge Leaders"),
-        h("p", { className: "panel-card__hint" }, "Challenge Points are separate from regular FICA ratings. Rankings here alone determine Specific Challenge limits.")),
+    return h(
+      "div", null,
+      h("div", { className: "panel-card" },
+        h("h2", { className: "panel-card__title" }, "Challenge Leaders"),
+        h("p", { className: "panel-card__hint" }, "Challenge Points are separate from regular ratings.")
+      ),
       h("div", { className: "panel-card standings-table-wrap" },
         h("table", { className: "standings-table" },
-          h("thead", null, h("tr", null, ["Rank","Player","CP","P","W","L","D","Win %"].map((x) => h("th", { key:x }, x)))),
-          h("tbody", null, rows.map((r,i) => h("tr", { key:r.player.id }, h("td",null,i+1), h("td",{className:"standings-table__team"},r.player.name), h("td",{className:"standings-table__pts"},r.points), h("td",null,r.played), h("td",null,r.wins), h("td",null,r.losses), h("td",null,r.draws), h("td",null,r.played ? Math.round(r.wins/r.played*100)+"%" : "0%"))))
+          h("thead", null,
+            h("tr", null, ["Rank", "Player", "CP", "P", "W", "L", "D"].map((x) => h("th", { key: x }, x)))
+          ),
+          h("tbody", null,
+            rows.map((r, i) => h("tr", { key: r.player.id },
+              h("td", null, i + 1),
+              h("td", { className: "standings-table__team" }, r.player.name),
+              h("td", { className: "standings-table__pts" }, r.points),
+              h("td", null, r.played), h("td", null, r.wins), h("td", null, r.losses), h("td", null, r.draws)
+            ))
+          )
         )
       )
     );
   }
-
-  function ChallengesView({ players, challenges, saveChallenges, challengeLedger, onStartChallenge }) {
-    const eligible = players.filter(isPaid);
-    const [type,setType]=useState("open"), [a1,setA1]=useState(""), [a2,setA2]=useState(""), [b1,setB1]=useState(""), [b2,setB2]=useState(""), [points,setPoints]=useState("1"), [message,setMessage]=useState("");
-    const [counter,setCounter]=useState({});
-    function p(id){ return players.find((x)=>x.id===id); }
-    function ranks(){ const rows=challengeStats(eligible, challengeLedger); const m={}; rows.forEach((x,i)=>m[x.player.id]=i+1); return m; }
-    function specificMax(){
-      if(type!=="specific" || !a1 || !a2 || !b1 || !b2) return 5;
-      const r=ranks(), ca=(r[a1]+r[a2])/2, cb=(r[b1]+r[b2])/2;
-      if(ca<=cb) return 5;
-      const gap=ca-cb; return gap<=2?5:gap<=5?4:gap<=10?3:2;
-    }
-    const maxPoints=type==="open"?10:specificMax();
-    function validFour(){ const ids=type==="open"?[a1,a2]:[a1,a2,b1,b2]; return ids.every(Boolean) && new Set(ids).size===ids.length; }
-    function post(){
-      if(!validFour()) return alert(type==="open"?"Select two different challenger players.":"Select four different players.");
-      const stake=parseInt(points,10); if(!Number.isFinite(stake)||stake<1||stake>maxPoints) return alert("Choose between 1 and "+maxPoints+" Challenge Points.");
-      const now=new Date().toISOString();
-      const item={id:uid(),type,status:type==="open"?"OPEN":"PENDING",challenger:{p1:a1,p2:a2},opponent:{p1:type==="specific"?b1:null,p2:type==="specific"?b2:null},points:stake,message:message.trim(),createdAt:now};
-      saveChallenges([item,...challenges]); setA1("");setA2("");setB1("");setB2("");setPoints("1");setMessage("");
-    }
-    function acceptOpen(c){ const ct=counter[c.id]||{}; if(!ct.p1||!ct.p2||ct.p1===ct.p2) return alert("Create a two-player counter-team first."); saveChallenges(challenges.map((x)=>x.id===c.id?{...x,status:"ACCEPTED",opponent:{p1:ct.p1,p2:ct.p2},acceptedAt:new Date().toISOString()}:x)); }
-    function update(c,status){ saveChallenges(challenges.map((x)=>x.id===c.id?{...x,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x)); }
-    function names(team){ return team&&team.p1&&team.p2 ? p(team.p1).name+" + "+p(team.p2).name : "Awaiting counter-team"; }
-    const used=[a1,a2,b1,b2].filter(Boolean);
-    function opts(current, exclude=[]){ return eligible.filter((x)=>x.id===current||(!used.includes(x.id)&&!exclude.includes(x.id))); }
+  function ChallengesView({players,challenges,saveChallenges,challengeLedger,onStartChallenge}) {
+    const eligible=players.filter(isPaid), [type,setType]=useState("open"), [a1,setA1]=useState(""), [a2,setA2]=useState(""), [b1,setB1]=useState(""), [b2,setB2]=useState(""), [points,setPoints]=useState("1"), [message,setMessage]=useState(""), [counter,setCounter]=useState({});
+    const live=challenges.filter(c=>["OPEN","PENDING","ACCEPTED","IN_PROGRESS"].includes(c.status));
+    function player(id){return players.find(x=>x.id===id)}
+    function ranks(){const m={};challengeStats(eligible,challengeLedger).forEach((x,i)=>m[x.player.id]=i+1);return m}
+    function max(){if(type!=="specific"||![a1,a2,b1,b2].every(Boolean))return 5;const r=ranks(),gap=(r[a1]+r[a2]-r[b1]-r[b2])/2;return gap<=2?5:gap<=5?4:gap<=10?3:2}
+    const maximum=type==="open"?10:max(), used=[a1,a2,b1,b2].filter(Boolean);
+    function select(value,setter,label,options){return h("select",{value,onChange:e=>setter(e.target.value),className:"form-select",style:{marginBottom:8}},h("option",{value:""},label),options.map(x=>h("option",{key:x.id,value:x.id},x.name)))}
+    function opts(current){return eligible.filter(x=>x.id===current||!used.includes(x.id))}
+    function post(){const ids=type==="open"?[a1,a2]:[a1,a2,b1,b2],stake=parseInt(points,10);if(!ids.every(Boolean)||new Set(ids).size!==ids.length)return alert("Select different players for all positions.");if(!Number.isFinite(stake)||stake<1||stake>maximum)return alert("Choose 1 to "+maximum+" Challenge Points.");saveChallenges([{id:uid(),type,status:type==="open"?"OPEN":"PENDING",challenger:{p1:a1,p2:a2},opponent:{p1:type==="specific"?b1:null,p2:type==="specific"?b2:null},points:stake,message:message.trim(),createdAt:new Date().toISOString()},...challenges]);setA1("");setA2("");setB1("");setB2("");setPoints("1");setMessage("")}
+    function update(c,status,extra={}){saveChallenges(challenges.map(x=>x.id===c.id?{...x,...extra,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x))}
+    function names(t){return t&&t.p1&&t.p2?player(t.p1).name+" + "+player(t.p2).name:"Awaiting counter-team"}
     return h("div",null,
-      h("div",{className:"panel-card"},h("h2",{className:"panel-card__title"},"⚔ Create a Challenge"),
-        h("div",{className:"match-type-toggle"},["open","specific"].map((x)=>h("button",{key:x,onClick:()=>{setType(x);setPoints("1");},className:"match-type-toggle__btn"+(type===x?" match-type-toggle__btn--active":"")},x==="open"?"Open Challenge":"Specific Challenge"))),
-        h("p",{className:"panel-card__hint"},type==="open"?"Anyone may create a counter-team and accept. Maximum 10 CP.":"Choose both teams. Maximum 5 CP, reduced when a lower Challenge-ranked team challenges a higher-ranked team."),
-        h("div",{className:"team-grid"},
-          h("div",null,h("div",{className:"team-picker__label"},"Challenger Team"),selectBox(a1,setA1,"Player 1",opts(a1)),selectBox(a2,setA2,"Player 2",opts(a2))),
-          type==="specific"&&h("div",null,h("div",{className:"team-picker__label"},"Challenged Team"),selectBox(b1,setB1,"Player 1",opts(b1)),selectBox(b2,setB2,"Player 2",opts(b2)))
-        ),
-        h("div",{className:"form-grid"},h("div",{className:"form-row"},h("label",{className:"form-label"},"Challenge Points (max "+maxPoints+")"),h("input",{type:"number",min:1,max:maxPoints,value:points,onChange:(e)=>setPoints(e.target.value),className:"form-input"})),h("div",{className:"form-row"},h("label",{className:"form-label"},"Message (optional)"),h("input",{value:message,onChange:(e)=>setMessage(e.target.value),className:"form-input",placeholder:"Add a challenge message"}))),
-        h("button",{onClick:post,className:"btn btn--gold btn--block"},type==="open"?"Post Open Challenge":"Send Specific Challenge")
-      ),
-      h("h2",{className:"section-title"},"Challenge Board"),
-      challenges.length===0?h("div",{className:"panel-card empty-state"},"No challenges posted yet."):
-      challenges.map((c)=>h("div",{key:c.id,className:"panel-card challenge-card"},
-        h("div",{className:"challenge-card__head"},h("strong",null,c.type==="open"?"OPEN CHALLENGE":"SPECIFIC CHALLENGE"),h("span",{className:"challenge-cp"},c.points," CP")),
-        h("div",{className:"challenge-vs"},h("span",null,names(c.challenger)),h("b",null," VS "),h("span",null,names(c.opponent))),
-        c.message&&h("p",{className:"panel-card__hint"},'“'+c.message+'”'),h("span",{className:"challenge-status challenge-status--"+c.status.toLowerCase()},c.status.replace("_"," ")),
-        c.type==="open"&&c.status==="OPEN"&&h("div",{className:"challenge-counter"},selectBox((counter[c.id]||{}).p1,(v)=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p1:v}}),"Counter player 1",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p2].includes(x.id))),selectBox((counter[c.id]||{}).p2,(v)=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p2:v}}),"Counter player 2",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p1].includes(x.id))),h("button",{onClick:()=>acceptOpen(c),className:"btn btn--primary btn--sm"},"Accept")),
-        c.type==="specific"&&c.status==="PENDING"&&h("div",{className:"match-actions"},h("button",{onClick:()=>update(c,"ACCEPTED"),className:"btn btn--primary btn--sm"},"Accept"),h("button",{onClick:()=>update(c,"REJECTED"),className:"btn btn--danger btn--sm"},"Reject")),
-        c.status==="ACCEPTED"&&h("button",{onClick:()=>onStartChallenge(c.id),className:"btn btn--gold btn--block"},"Start Match"),
-        ["OPEN","PENDING"].includes(c.status)&&h("button",{onClick:()=>update(c,"CANCELLED"),className:"link-btn",style:{marginTop:10}},"Cancel challenge")
-      ))
-    );
-    function selectBox(value,setter,label,options){ return h("select",{value,onChange:(e)=>setter(e.target.value),className:"form-select",style:{marginBottom:8}},h("option",{value:""},label),options.map((x)=>h("option",{key:x.id,value:x.id},x.name))); }
+      h("div",{className:"panel-card"},h("h2",{className:"panel-card__title"},"Create a Challenge"),h("div",{className:"match-type-toggle"},["open","specific"].map(x=>h("button",{key:x,onClick:()=>{setType(x);setPoints("1")},className:"match-type-toggle__btn"+(type===x?" match-type-toggle__btn--active":"")},x==="open"?"Open Challenge":"Specific Challenge"))),h("p",{className:"panel-card__hint"},type==="open"?"Anyone may accept. Maximum 10 CP.":"Choose both teams. Maximum 5 CP, based on Challenge-rank gap."),h("div",{className:"team-grid"},h("div",null,h("b",null,"Challenger Team"),select(a1,setA1,"Player 1",opts(a1)),select(a2,setA2,"Player 2",opts(a2))),type==="specific"&&h("div",null,h("b",null,"Challenged Team"),select(b1,setB1,"Player 1",opts(b1)),select(b2,setB2,"Player 2",opts(b2)))),h("div",{className:"form-grid"},h("div",{className:"form-row"},h("label",{className:"form-label"},"Challenge Points, max "+maximum),h("input",{type:"number",min:1,max:maximum,value:points,onChange:e=>setPoints(e.target.value),className:"form-input"})),h("div",{className:"form-row"},h("label",{className:"form-label"},"Message"),h("input",{value:message,onChange:e=>setMessage(e.target.value),className:"form-input"}))),h("button",{onClick:post,className:"btn btn--gold btn--block"},type==="open"?"Post Open Challenge":"Send Specific Challenge")),
+      h("h2",{className:"section-title"},"Live Challenges"),
+      live.length===0?h("div",{className:"panel-card empty-state"},"No live challenges available."):live.map(c=>h("div",{key:c.id,className:"panel-card challenge-card"},h("div",{className:"challenge-head"},h("strong",null,c.type==="open"?"OPEN CHALLENGE":"SPECIFIC CHALLENGE"),h("span",{className:"challenge-cp"},c.points," CP")),h("p",null,names(c.challenger)," vs ",names(c.opponent)),c.message&&h("p",{className:"panel-card__hint"},c.message),h("b",null,c.status),c.type==="open"&&c.status==="OPEN"&&h("div",{className:"challenge-counter"},select((counter[c.id]||{}).p1,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p1:v}}),"Counter player 1",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p2].includes(x.id))),select((counter[c.id]||{}).p2,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p2:v}}),"Counter player 2",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p1].includes(x.id))),h("button",{onClick:()=>{const t=counter[c.id]||{};if(!t.p1||!t.p2)return alert("Select two counter-team players.");update(c,"ACCEPTED",{opponent:{p1:t.p1,p2:t.p2}})},className:"btn btn--primary btn--sm"},"Accept")),c.type==="specific"&&c.status==="PENDING"&&h("div",{className:"match-actions"},h("button",{onClick:()=>update(c,"ACCEPTED"),className:"btn btn--primary"},"Accept"),h("button",{onClick:()=>update(c,"REJECTED"),className:"btn btn--danger"},"Reject")),c.status==="ACCEPTED"&&h("button",{onClick:()=>onStartChallenge(c.id),className:"btn btn--gold btn--block"},"Start Match"),["OPEN","PENDING"].includes(c.status)&&h("button",{onClick:()=>update(c,"CANCELLED"),className:"link-btn"},"Cancel challenge")))
+    )
   }
 
   /* ==================================================================== *
@@ -1051,7 +1002,7 @@
     const [coinsUsed, setCoinsUsed] = useState({ black: 0, white: 0, red: 0 });
     const [lastCoinSource, setLastCoinSource] = useState({ black: null, white: null }); // 'pot' | 'foul' | null - source of the MOST RECENT coin taken for each color (not cumulative)
     const [summary, setSummary] = useState(null);
-    const [matchType, setMatchType] = useState(activeChallengeId ? "challenge" : "friendly"); // friendly | tournament | challenge
+    const [matchType, setMatchType] = useState(activeChallengeId ? "challenge" : "friendly");
     const [tourId, setTourId] = useState("");
     const [teamBlackId, setTeamBlackId] = useState("");
     const [teamWhiteId, setTeamWhiteId] = useState("");
@@ -1064,9 +1015,7 @@
     // the chosen teams at render time (not via a separate effect+state sync,
     // which could race with canStart()/OddsPanel rendering before it catches up).
     function computeEffectiveSel() {
-      if (matchType === "challenge" && activeChallenge) {
-        return { blackA: activeChallenge.challenger.p1, blackB: activeChallenge.challenger.p2, whiteA: activeChallenge.opponent.p1, whiteB: activeChallenge.opponent.p2 };
-      }
+      if (matchType === "challenge" && activeChallenge) return { blackA: activeChallenge.challenger.p1, blackB: activeChallenge.challenger.p2, whiteA: activeChallenge.opponent.p1, whiteB: activeChallenge.opponent.p2 };
       if (matchType !== "tournament" || !selectedTournament) return sel;
       const teamBlack = selectedTournament.teams.find((t) => t.id === teamBlackId);
       const teamWhite = selectedTournament.teams.find((t) => t.id === teamWhiteId);
@@ -1109,7 +1058,7 @@
       setHistory([]);
       setSummary(null);
       if (matchType === "challenge" && activeChallenge) {
-        setMatchMeta({ challengeId: activeChallenge.id, challengePoints: activeChallenge.points, challengeType: activeChallenge.type });
+        setMatchMeta({ challengeId: activeChallenge.id, challengePoints: activeChallenge.points });
         saveChallenges(challenges.map((c) => c.id === activeChallenge.id ? { ...c, status: "IN_PROGRESS", startedAt: new Date().toISOString() } : c));
       } else if (matchType === "tournament" && selectedTournament) {
         const teamBlack = selectedTournament.teams.find((t) => t.id === teamBlackId);
@@ -1326,13 +1275,11 @@
         challengePoints: matchMeta && matchMeta.challengeId ? matchMeta.challengePoints : null
       };
       if (matchMeta && matchMeta.challengeId) {
-        const stake = Number(matchMeta.challengePoints) || 0;
-        const changes = [];
-        [sel.blackA, sel.blackB].forEach((id) => changes.push({ playerId: id, points: isDraw ? 0 : blackWon ? stake : -stake }));
-        [sel.whiteA, sel.whiteB].forEach((id) => changes.push({ playerId: id, points: isDraw ? 0 : whiteWon ? stake : -stake }));
-        const ledgerEntry = { id: uid(), challengeId: matchMeta.challengeId, matchId: record.id, date: record.date, stake, winner: record.winner, changes, reversed: false };
-        saveChallengeLedger([ledgerEntry, ...challengeLedger]);
-        saveChallenges(challenges.map((c) => c.id === matchMeta.challengeId ? { ...c, status: "COMPLETED", completedAt: record.date, matchId: record.id, winner: record.winner } : c));
+        const stake = Number(matchMeta.challengePoints) || 0, changes = [];
+        [sel.blackA, sel.blackB].forEach((id) => changes.push({ playerId:id, points:isDraw?0:(blackWon?stake:-stake) }));
+        [sel.whiteA, sel.whiteB].forEach((id) => changes.push({ playerId:id, points:isDraw?0:(whiteWon?stake:-stake) }));
+        saveChallengeLedger([{ id:uid(), challengeId:matchMeta.challengeId, matchId:record.id, date:record.date, stake, changes, reversed:false }, ...challengeLedger]);
+        saveChallenges(challenges.map((c) => c.id === matchMeta.challengeId ? { ...c, status:"COMPLETED", completedAt:record.date, matchId:record.id, winner:record.winner } : c));
         setActiveChallengeId(null);
       }
       savePlayers(nextPlayers);
@@ -1507,9 +1454,9 @@
             className: "match-type-toggle__btn" + (matchType === "tournament" ? " match-type-toggle__btn--active" : "")
           },
           "Tournament"
-        )
+        ),
+        h("button", { onClick: () => setMatchType("challenge"), className: "match-type-toggle__btn" + (matchType === "challenge" ? " match-type-toggle__btn--active" : "") }, "Challenge")
       ),
-
       matchType === "friendly"
         ? h(
             "div",
@@ -1518,14 +1465,10 @@
             h(TeamPicker, { label: "\u25CB Team White", slotA: "whiteA", slotB: "whiteB", sel, setSel, optionsFor })
           )
         : matchType === "tournament"
-        ? h(TournamentMatchPicker, {
-            tournaments, tourId, setTourId, teamBlackId, setTeamBlackId, teamWhiteId, setTeamWhiteId, playerById
-          })
+        ? h(TournamentMatchPicker, { tournaments, tourId, setTourId, teamBlackId, setTeamBlackId, teamWhiteId, setTeamWhiteId, playerById })
         : activeChallenge
-        ? h("div", { className: "challenge-match-banner" },
-            h("strong", null, "Challenge Match · ", activeChallenge.points, " CP"),
-            h("div", null, playerById(activeChallenge.challenger.p1).name, " + ", playerById(activeChallenge.challenger.p2).name, " vs ", playerById(activeChallenge.opponent.p1).name, " + ", playerById(activeChallenge.opponent.p2).name))
-        : h("div", { className: "panel-card__hint", style: { padding: "12px 0" } }, "Accept a challenge from the Challenges tab, then select Start Match."),
+        ? h("div", { className:"challenge-match-banner" }, h("strong", null, "Challenge Match · ", activeChallenge.points, " CP"), h("div", null, playerById(activeChallenge.challenger.p1).name, " + ", playerById(activeChallenge.challenger.p2).name, " vs ", playerById(activeChallenge.opponent.p1).name, " + ", playerById(activeChallenge.opponent.p2).name))
+        : h("p", { className:"panel-card__hint" }, "Accept a challenge from the Challenges tab, then select Start Match."),
 
       canStart() && h(OddsPanel, { black: [playerById(effectiveSel.blackA), playerById(effectiveSel.blackB)], white: [playerById(effectiveSel.whiteA), playerById(effectiveSel.whiteB)] }),
       h(
@@ -2066,16 +2009,6 @@
     );
   }
 
-
-  const challengeStyle = document.createElement("style");
-  challengeStyle.textContent = `
-    .challenge-card{border-left:5px solid #b8923f}.challenge-card__head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-    .challenge-cp{background:#2d1a0f;color:#f2c14e;border-radius:999px;padding:6px 12px;font-weight:800}.challenge-vs{display:flex;gap:12px;justify-content:center;align-items:center;flex-wrap:wrap;font-size:1.05rem;margin:12px 0}
-    .challenge-status{display:inline-block;margin:8px 0;padding:4px 9px;border-radius:999px;background:#ece7dc;font-size:.75rem;font-weight:800}.challenge-status--accepted{background:#dff2e5;color:#146b32}.challenge-status--completed{background:#dfe9f7;color:#194f8a}.challenge-status--rejected,.challenge-status--cancelled{background:#f8dddd;color:#8a1c1c}
-    .challenge-counter{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:start;margin-top:12px}.challenge-match-banner{background:#fff7df;border:1px solid #d4aa4b;border-radius:14px;padding:16px;margin:12px 0;text-align:center}.challenge-match-banner strong{display:block;color:#8a5a00;margin-bottom:6px}
-    @media(max-width:700px){.challenge-counter{grid-template-columns:1fr}.tabs{overflow-x:auto;justify-content:flex-start}.tab-btn{min-width:130px}.challenge-vs{flex-direction:column}}
-  `;
-  document.head.appendChild(challengeStyle);
-
+  const challengeStyle=document.createElement("style");challengeStyle.textContent=`.tabs{overflow-x:auto}.tab-btn{min-width:110px}.challenge-card{border-left:5px solid var(--gold)}.challenge-head{display:flex;justify-content:space-between}.challenge-cp{background:var(--ink);color:var(--gold-light);border-radius:999px;padding:5px 10px}.challenge-counter{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:12px}.challenge-match-banner{padding:15px;background:#fff4cf;border:1px solid var(--gold);border-radius:16px;text-align:center}@media(max-width:640px){.challenge-counter{grid-template-columns:1fr}}`;document.head.appendChild(challengeStyle);
   ReactDOM.createRoot(document.getElementById("root")).render(h(CarromRatings, null));
 })();
