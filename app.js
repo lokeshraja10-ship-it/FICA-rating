@@ -188,7 +188,7 @@
           : view === "match"
           ? h(MatchView, { players, savePlayers, matches, saveMatches, tournaments, saveTournaments, challenges, saveChallenges, challengeLedger, saveChallengeLedger, activeChallengeId, setActiveChallengeId, isAdmin, onViewRankings: () => setView("players") })
           : view === "challenges"
-          ? h(ChallengesView, { players, challenges, saveChallenges, challengeLedger, onStartChallenge: startAcceptedChallenge })
+          ? h(ChallengesView, { players, challenges, saveChallenges, challengeLedger, onStartChallenge: startAcceptedChallenge, isAdmin })
           : view === "challengeLeaders"
           ? h(ChallengeLeaderboard, { players, challengeLedger })
           : view === "history"
@@ -990,8 +990,9 @@
       )
     );
   }
-  function ChallengesView({players,challenges,saveChallenges,challengeLedger,onStartChallenge}) {
-    const eligible=players.filter(isPaid), [type,setType]=useState("open"), [a1,setA1]=useState(""), [a2,setA2]=useState(""), [b1,setB1]=useState(""), [b2,setB2]=useState(""), [points,setPoints]=useState("1"), [message,setMessage]=useState(""), [counter,setCounter]=useState({});
+  function ChallengesView({players,challenges,saveChallenges,challengeLedger,onStartChallenge,isAdmin}) {
+    const eligible=players.filter(isPaid), [type,setType]=useState("open"), [a1,setA1]=useState(""), [a2,setA2]=useState(""), [b1,setB1]=useState(""), [b2,setB2]=useState(""), [points,setPoints]=useState("1"), [message,setMessage]=useState(""), [counter,setCounter]=useState({}), [busy,setBusy]=useState({});
+    const notifiedRef=useRef(new Set());
     const live=challenges.filter(c=>["OPEN","PENDING","ACCEPTED","IN_PROGRESS"].includes(c.status));
     function player(id){return players.find(x=>x.id===id)}
     function ranks(){const m={};challengeStats(eligible,challengeLedger).forEach((x,i)=>m[x.player.id]=i+1);return m}
@@ -1000,12 +1001,27 @@
     function select(value,setter,label,options){return h("select",{value,onChange:e=>setter(e.target.value),className:"form-select",style:{marginBottom:8}},h("option",{value:""},label),options.map(x=>h("option",{key:x.id,value:x.id},x.name)))}
     function opts(current){return eligible.filter(x=>x.id===current||!used.includes(x.id))}
     function post(){const ids=type==="open"?[a1,a2]:[a1,a2,b1,b2],stake=parseInt(points,10);if(!ids.every(Boolean)||new Set(ids).size!==ids.length)return alert("Select different players for all positions.");if(!Number.isFinite(stake)||stake<1||stake>maximum)return alert("Choose 1 to "+maximum+" Challenge Points.");const msg=message.trim();saveChallenges([{id:uid(),type,status:type==="open"?"OPEN":"PENDING",challenger:{p1:a1,p2:a2},opponent:{p1:type==="specific"?b1:null,p2:type==="specific"?b2:null},points:stake,message:msg,createdAt:new Date().toISOString()},...challenges]);sendWhatsAppMessage("\u{1F3AF} New "+(type==="open"?"Open":"Specific")+" Challenge Posted!\n"+player(a1).name+" + "+player(a2).name+(type==="specific"?" vs "+player(b1).name+" + "+player(b2).name:"")+"\nStake: "+stake+" CP"+(msg?"\nMessage: "+msg:""));setA1("");setA2("");setB1("");setB2("");setPoints("1");setMessage("")}
-    function update(c,status,extra={}){saveChallenges(challenges.map(x=>x.id===c.id?{...x,...extra,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x));if(status==="ACCEPTED"){const opp=extra.opponent||c.opponent;sendWhatsAppMessage("\u2705 Challenge Accepted!\n"+names(c.challenger)+" vs "+names(opp)+"\nStake: "+c.points+" CP"+(c.message?"\nMessage: "+c.message:""))}}
+    async function update(c,status,extra={}){
+      const notifyKey=c.id+":"+status, shouldNotify=status==="ACCEPTED"&&!notifiedRef.current.has(notifyKey);
+      if(shouldNotify)notifiedRef.current.add(notifyKey);
+      await saveChallenges(challenges.map(x=>x.id===c.id?{...x,...extra,status,[status.toLowerCase()+"At"]:new Date().toISOString()}:x));
+      if(shouldNotify){const opp=extra.opponent||c.opponent;sendWhatsAppMessage("\u2705 Challenge Accepted!\n"+names(c.challenger)+" vs "+names(opp)+"\nStake: "+c.points+" CP"+(c.message?"\nMessage: "+c.message:""))}
+    }
+    async function guardedUpdate(c,status,extra={}){
+      if(busy[c.id])return;
+      setBusy(b=>({...b,[c.id]:true}));
+      await update(c,status,extra);
+      setBusy(b=>({...b,[c.id]:false}));
+    }
+    function remove(c){
+      if(!window.confirm("Delete this challenge? This cannot be undone."))return;
+      saveChallenges(challenges.filter(x=>x.id!==c.id));
+    }
     function names(t){return t&&t.p1&&t.p2?player(t.p1).name+" + "+player(t.p2).name:"Awaiting counter-team"}
     return h("div",null,
       h("div",{className:"panel-card"},h("h2",{className:"panel-card__title"},"Create a Challenge"),h("div",{className:"match-type-toggle"},["open","specific"].map(x=>h("button",{key:x,onClick:()=>{setType(x);setPoints("1")},className:"match-type-toggle__btn"+(type===x?" match-type-toggle__btn--active":"")},x==="open"?"Open Challenge":"Specific Challenge"))),h("p",{className:"panel-card__hint"},type==="open"?"Anyone may accept. Maximum 10 CP.":"Choose both teams. Maximum 5 CP, based on Challenge-rank gap."),h("div",{className:"team-grid"},h("div",null,h("b",null,"Challenger Team"),select(a1,setA1,"Player 1",opts(a1)),select(a2,setA2,"Player 2",opts(a2))),type==="specific"&&h("div",null,h("b",null,"Challenged Team"),select(b1,setB1,"Player 1",opts(b1)),select(b2,setB2,"Player 2",opts(b2)))),h("div",{className:"form-grid"},h("div",{className:"form-row"},h("label",{className:"form-label"},"Challenge Points, max "+maximum),h("input",{type:"number",min:1,max:maximum,value:points,onChange:e=>setPoints(e.target.value),className:"form-input"})),h("div",{className:"form-row"},h("label",{className:"form-label"},"Message"),h("input",{value:message,onChange:e=>setMessage(e.target.value),className:"form-input"}))),h("button",{onClick:post,className:"btn btn--gold btn--block"},type==="open"?"Post Open Challenge":"Send Specific Challenge")),
       h("h2",{className:"section-title"},"Live Challenges"),
-      live.length===0?h("div",{className:"panel-card empty-state"},"No live challenges available."):live.map(c=>h("div",{key:c.id,className:"panel-card challenge-card"},h("div",{className:"challenge-head"},h("strong",null,c.type==="open"?"OPEN CHALLENGE":"SPECIFIC CHALLENGE"),h("span",{className:"challenge-cp"},c.points," CP")),h("p",null,names(c.challenger)," vs ",names(c.opponent)),c.message&&h("p",{className:"panel-card__hint"},c.message),h("b",null,c.status),c.type==="open"&&c.status==="OPEN"&&h("div",{className:"challenge-counter"},select((counter[c.id]||{}).p1,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p1:v}}),"Counter player 1",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p2].includes(x.id))),select((counter[c.id]||{}).p2,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p2:v}}),"Counter player 2",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p1].includes(x.id))),h("button",{onClick:()=>{const t=counter[c.id]||{};if(!t.p1||!t.p2)return alert("Select two counter-team players.");update(c,"ACCEPTED",{opponent:{p1:t.p1,p2:t.p2}})},className:"btn btn--primary btn--sm"},"Accept")),c.type==="specific"&&c.status==="PENDING"&&h("div",{className:"match-actions"},h("button",{onClick:()=>update(c,"ACCEPTED"),className:"btn btn--primary"},"Accept"),h("button",{onClick:()=>update(c,"REJECTED"),className:"btn btn--danger"},"Reject")),c.status==="ACCEPTED"&&h("button",{onClick:()=>onStartChallenge(c.id),className:"btn btn--gold btn--block"},"Start Match"),["OPEN","PENDING"].includes(c.status)&&h("button",{onClick:()=>update(c,"CANCELLED"),className:"link-btn"},"Cancel challenge")))
+      live.length===0?h("div",{className:"panel-card empty-state"},"No live challenges available."):live.map(c=>h("div",{key:c.id,className:"panel-card challenge-card"},h("div",{className:"challenge-head"},h("strong",null,c.type==="open"?"OPEN CHALLENGE":"SPECIFIC CHALLENGE"),h("span",{className:"challenge-cp"},c.points," CP"),isAdmin&&h("button",{onClick:()=>remove(c),className:"icon-btn icon-btn--danger",title:"Delete challenge"},"\u2716")),h("p",null,names(c.challenger)," vs ",names(c.opponent)),c.message&&h("p",{className:"panel-card__hint"},c.message),h("b",null,c.status),c.type==="open"&&c.status==="OPEN"&&h("div",{className:"challenge-counter"},select((counter[c.id]||{}).p1,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p1:v}}),"Counter player 1",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p2].includes(x.id))),select((counter[c.id]||{}).p2,v=>setCounter({...counter,[c.id]:{...(counter[c.id]||{}),p2:v}}),"Counter player 2",eligible.filter(x=>![c.challenger.p1,c.challenger.p2,(counter[c.id]||{}).p1].includes(x.id))),h("button",{disabled:!!busy[c.id],onClick:()=>{const t=counter[c.id]||{};if(!t.p1||!t.p2)return alert("Select two counter-team players.");guardedUpdate(c,"ACCEPTED",{opponent:{p1:t.p1,p2:t.p2}})},className:"btn btn--primary btn--sm"},"Accept")),c.type==="specific"&&c.status==="PENDING"&&h("div",{className:"match-actions"},h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"ACCEPTED"),className:"btn btn--primary"},"Accept"),h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"REJECTED"),className:"btn btn--danger"},"Reject")),c.status==="ACCEPTED"&&h("button",{onClick:()=>onStartChallenge(c.id),className:"btn btn--gold btn--block"},"Start Match"),["OPEN","PENDING"].includes(c.status)&&h("button",{disabled:!!busy[c.id],onClick:()=>guardedUpdate(c,"CANCELLED"),className:"link-btn"},"Cancel challenge")))
     )
   }
 
